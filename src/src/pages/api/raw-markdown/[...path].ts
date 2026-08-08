@@ -11,7 +11,26 @@ interface MarkdownFile {
   filePath: string;
 }
 
+/** 归档版本 slug 列表（starlight-versions 生成于 src/content/versions/*.json） */
+function getArchivedVersionSlugs(): string[] {
+  const versionsDir = path.join(process.cwd(), 'src', 'content', 'versions');
+  if (!fs.existsSync(versionsDir)) return [];
+  return fs
+    .readdirSync(versionsDir)
+    .filter((f) => f.endsWith('.json'))
+    .map((f) => f.replace(/\.json$/, ''));
+}
+
+/** 判断相对路径是否属于归档版本目录（如 0.9/xxx 或 en/0.9/xxx） */
+function isVersionedPath(relativePath: string, versionSlugs: string[]): boolean {
+  const [first, second] = relativePath.split('/');
+  return versionSlugs.includes(first) || (first === 'en' && versionSlugs.includes(second));
+}
+
 // Gather all markdown files at build time
+// 注意：包含归档版本目录（如 0.9/xxx、en/0.9/xxx），
+// 因为旧版本页面的「Markdown 原文」按钮和 AI 读取旧文档都需要这些静态文件。
+// llms.txt 的索引过滤（只索引当前版）在 src/integrations/llms.ts 中处理。
 function getAllMarkdownFiles(): MarkdownFile[] {
   const basePath = path.join(process.cwd(), 'src', 'content', 'docs');
   const files: MarkdownFile[] = [];
@@ -26,7 +45,7 @@ function getAllMarkdownFiles(): MarkdownFile[] {
       const stat = fs.statSync(fullPath);
       
       if (stat.isDirectory()) {
-        scanDirectory(fullPath, path.join(relativePath, item));
+        scanDirectory(fullPath, relativePath ? path.join(relativePath, item) : item);
       } else if (item.endsWith('.md') || item.endsWith('.mdx')) {
         const slug = path.join(relativePath, item.replace(/\.(md|mdx)$/, '')).replace(/\\/g, '/');
         files.push({
@@ -73,6 +92,10 @@ export const GET: APIRoute = async ({ params }) => {
   if (slug === 'manifest') {
     return generateManifest(contentType);
   }
+
+  // 注意：允许访问归档版本路径（/api/raw-markdown/0.9/xxx.txt），
+  // 供旧版本页面的「Markdown 原文」按钮和 AI 读取旧版本文档使用。
+  // 版本文件位于 docs/0.9/ 下，与当前版文件路径自然隔离。
   
   const basePath = path.join(process.cwd(), 'src', 'content', 'docs');
   
@@ -148,6 +171,7 @@ Please try again later or contact support if the problem persists.
 
 function generateManifest(contentType: string) {
   const basePath = path.join(process.cwd(), 'src', 'content', 'docs');
+  const versionSlugs = getArchivedVersionSlugs();
   const files: Array<{
     path: string;
     title: string;
@@ -167,7 +191,10 @@ function generateManifest(contentType: string) {
       const stat = fs.statSync(fullPath);
       
       if (stat.isDirectory()) {
-        scanDirectory(fullPath, path.join(relativePath, item));
+        const childPath = path.join(relativePath, item).replace(/\\/g, '/');
+        // 跳过归档版本目录，只暴露当前版本
+        if (isVersionedPath(childPath, versionSlugs)) continue;
+        scanDirectory(fullPath, relativePath ? path.join(relativePath, item) : item);
       } else if (item.endsWith('.md') || item.endsWith('.mdx')) {
         const content = fs.readFileSync(fullPath, 'utf-8');
         const metadata = extractMetadata(content);

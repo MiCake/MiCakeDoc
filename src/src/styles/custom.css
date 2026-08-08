@@ -70,14 +70,30 @@
   --sl-color-accent-high: var(--brand-primary);
   --sl-color-text: var(--text-primary);
   --sl-color-text-accent: var(--brand-accent);
-  --sl-color-white: #FFFFFF;
+  /* 前景文字色：浅色模式下官方为深色（hsl(224,10%,10%)），
+     用于 .toggle 等组件的 hover 文字、标题、链接、图标等。
+     之前误设为 #FFFFFF 导致浅色模式下白字白底不可见。 */
+  --sl-color-white: var(--text-primary);
   --sl-color-gray-1: var(--text-primary);
   --sl-color-gray-2: var(--text-secondary);
   --sl-color-gray-3: var(--text-muted);
   --sl-color-gray-4: #D6D3D1;
   --sl-color-gray-5: #E7E5E4;
   --sl-color-gray-6: #F5F5F4;
-  --sl-color-black: #1F1B18;
+  /* 反色表面：Starlight 浅色模式下应为浅色背景（官方默认白色）。
+     之前误设为深棕 #1F1B18，导致 .toggle / 搜索框 / 移动菜单等
+     组件在浅色模式下深色背景 + 深色文字不可见。 */
+  --sl-color-black: #FFFFFF;
+}
+
+/* 浅色模式下选择器（主题/语言/版本）hover 高亮：
+   Starlight 默认 label:hover 用 --sl-color-white（白字），
+   在浅色白底导航栏上不可见，改为品牌橙色。 */
+[data-theme="light"] .header label:hover,
+[data-theme="light"] starlight-theme-select label:hover,
+[data-theme="light"] starlight-lang-select label:hover,
+[data-theme="light"] starlight-version-select label:hover {
+  color: var(--brand-accent) !important;
 }
 
 /* ==================== GLOBAL STYLES ==================== */

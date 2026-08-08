@@ -2,8 +2,8 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import react from '@astrojs/react';
-import tailwind from '@astrojs/tailwind';
 import sitemap from '@astrojs/sitemap';
+import starlightVersions from 'starlight-versions';
 
 // https://astro.build/config
 export default defineConfig({
@@ -11,10 +11,8 @@ export default defineConfig({
 	integrations: [
 		sitemap(),
 		react(),
-		tailwind({
-			// Disable injecting base styles for Starlight compatibility
-			applyBaseStyles: false,
-		}),
+		// Tailwind 通过 PostCSS 集成（见 postcss.config.mjs），
+		// 不再使用 @astrojs/tailwind（不支持 Astro 7）
 		starlight({
 			title: 'MiCake',
 			logo: {
@@ -31,6 +29,16 @@ export default defineConfig({
 					lang: 'en',
 				},
 			},
+			plugins: [
+				// 文档版本化：当前文档为最新版，归档版本见 versions 数组
+				// 新增版本流程：1) 在 versions 数组加新 slug 2) 启动 dev 自动归档当前版
+				starlightVersions({
+					current: { label: '最新版' },
+					versions: [
+						{ slug: '10.0.0', label: 'v10.0.0' },
+					],
+				}),
+			],
 			social: [
 				{ icon: 'github', label: 'GitHub', href: 'https://github.com/MiCake/MiCake' }
 			],

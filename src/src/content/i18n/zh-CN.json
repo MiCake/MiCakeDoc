@@ -1,0 +1,9 @@
+{
+  "starlightVersions.link.latest": "切换到<a href=\"{{link}}\">最新版本文档</a>。",
+  "starlightVersions.outdated.label": "此内容对应 {{label}} 版本。",
+  "starlightVersions.outdated.slug": "此内容对应 {{slug}} 版本。",
+  "starlightVersions.search.link.latest": "切换到<a href=\"{{link}}\">最新版本</a>以获得最新结果。",
+  "starlightVersions.search.outdated.label": "搜索范围限定为 {{label}}。",
+  "starlightVersions.search.outdated.slug": "搜索范围限定为 {{slug}} 版本。",
+  "starlightVersions.select.accessibleLabel": "选择版本"
+}

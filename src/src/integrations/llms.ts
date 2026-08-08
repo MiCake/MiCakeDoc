@@ -127,9 +127,18 @@ export interface DocEntry {
 export async function getAllDocs(locale: DocLocale = 'en'): Promise<DocEntry[]> {
 	const collection = await getCollection('docs');
 
+	// 归档版本目录（starlight-versions 生成，如 docs/0.9/、docs/en/0.9/）
+	// 从 src/content/versions/*.json 动态读取版本 slug，新增版本无需改代码
+	const versionSlugs = await getArchivedVersionSlugs();
+	const isVersioned = (id: string): boolean => {
+		const [first, second] = id.split('/');
+		return versionSlugs.includes(first) || (first === 'en' && versionSlugs.includes(second));
+	};
+
 	const zhBySlug = new Map<string, (typeof collection)[number]>();
 	const enBySlug = new Map<string, (typeof collection)[number]>();
 	for (const entry of collection) {
+		if (isVersioned(entry.id)) continue; // 跳过归档版本，只索引当前版
 		if (entry.id.startsWith(EN_PREFIX)) {
 			enBySlug.set(entry.id.slice(EN_PREFIX.length), entry);
 		} else {
@@ -171,6 +180,7 @@ export async function getAllDocs(locale: DocLocale = 'en'): Promise<DocEntry[]> 
 	// 未在 DOC_GROUPS 中配置的文档（中英文都算，英文优先），按 slug 排序排在最后
 	const extraSlugs = new Set<string>();
 	for (const entry of collection) {
+		if (isVersioned(entry.id)) continue; // 跳过归档版本
 		const slug = entry.id.startsWith(EN_PREFIX) ? entry.id.slice(EN_PREFIX.length) : entry.id;
 		if (!used.has(slug) && !order.includes(slug)) extraSlugs.add(slug);
 	}
@@ -180,6 +190,16 @@ export async function getAllDocs(locale: DocLocale = 'en'): Promise<DocEntry[]> 
 	}
 
 	return docs;
+}
+
+/** 读取归档版本 slug 列表（来自 starlight-versions 生成的 content/versions/*.json） */
+async function getArchivedVersionSlugs(): Promise<string[]> {
+	const versionsDir = path.join(process.cwd(), 'src', 'content', 'versions');
+	if (!fs.existsSync(versionsDir)) return [];
+	return fs
+		.readdirSync(versionsDir)
+		.filter((f) => f.endsWith('.json'))
+		.map((f) => f.replace(/\.json$/, ''));
 }
 
 /** 读取文档正文（不含 frontmatter） */

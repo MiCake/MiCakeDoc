@@ -1,6 +1,10 @@
 ---
 // 覆盖 Starlight 默认 PageTitle：在文档标题旁添加「查看 Markdown 原文」快捷按钮
 // 链接指向 /api/raw-markdown/{id}.txt —— 与 llms.txt 中 AI 使用的地址一致
+// 同时手动渲染 starlight-versions 的 VersionNotice（版本提示横幅），
+// 因为该插件会因我们自定义了 PageTitle 而跳过自动注入
+import VersionNotice from 'starlight-versions/components/VersionNotice.astro';
+
 // 注：id="_top" 与 Starlight 的 PAGE_TITLE_ID 常量一致（跳过链接定位锚点）
 const { entry, locale } = Astro.locals.starlightRoute;
 const isEnglish = locale === 'en';
@@ -35,6 +39,9 @@ const tooltip = isEnglish
 		<span>{label}</span>
 	</a>
 </div>
+
+<!-- 版本提示横幅：仅旧版本页面显示（starlight-versions） -->
+<VersionNotice />
 
 <style>
 	.title-row {
