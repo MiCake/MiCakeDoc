@@ -18,7 +18,7 @@ The core responsibilities of a unit of work:
 
 ### Automatic Unit of Work in ASP.NET Core Applications (Recommended)
 
-When you use the `MiCake.AspNetCore` module and the `MiCakeAspNetUowOption.IsAutoUowEnabled` option is enabled (defaults to true), a unit of work is created automatically at the beginning of every HTTP request and committed or rolled back automatically at the end of the request. You don't need to worry about the unit of work lifecycle.
+When you use the `MiCake.AspNetCore` module and the `MiCakeAspNetUowOptions.EnableAutoUnitOfWork` option is enabled (defaults to true), a unit of work is created automatically at the beginning of every HTTP request and committed or rolled back automatically at the end of the request. You don't need to worry about the unit of work lifecycle.
 
 ```csharp
 // Startup.cs or Program.cs - automatic unit of work is enabled by default
@@ -29,7 +29,7 @@ services.AddMiCakeWithDefault<MyModule, MyDbContext>(options =>
 {
     options.AspNetConfig = asp =>
     {
-        asp.UnitOfWork.IsAutoUowEnabled = false;
+        asp.UnitOfWork.EnableAutoUnitOfWork = false;
     };
 });
 ```
@@ -39,9 +39,9 @@ services.AddMiCakeWithDefault<MyModule, MyDbContext>(options =>
 ```csharp
 public class OrderController : ControllerBase
 {
-    private readonly IRepository<Order> _orderRepository;
+    private readonly IRepository<Order, int> _orderRepository;
 
-    public OrderController(IRepository<Order> orderRepository)
+    public OrderController(IRepository<Order, int> orderRepository)
     {
         _orderRepository = orderRepository;
     }
@@ -67,11 +67,11 @@ For non-Web scenarios or cases requiring precise control:
 public class OrderService
 {
     private readonly IUnitOfWorkManager _uowManager;
-    private readonly IRepository<Order> _orderRepository;
+    private readonly IRepository<Order, int> _orderRepository;
 
     public OrderService(
         IUnitOfWorkManager uowManager,
-        IRepository<Order> orderRepository)
+        IRepository<Order, int> orderRepository)
     {
         _uowManager = uowManager;
         _orderRepository = orderRepository;
@@ -117,21 +117,27 @@ await uow.CommitAsync();
 
 ### Immediate Mode
 
-The transaction starts as soon as the unit of work is created:
+Use the `UnitOfWorkOptions.Immediate` static factory, or set the initialization mode manually:
 
 ```csharp
-var options = new UnitOfWorkOptions
-{
-    InitializationMode = TransactionInitializationMode.Immediate
-};
-
-using var uow = await _uowManager.BeginAsync(options);
+// Option 1: use the static factory (recommended)
+using var uow = await _uowManager.BeginAsync(UnitOfWorkOptions.Immediate);
 // The transaction starts immediately
 
 var order = await _orderRepository.FindAsync(1);
 // Use the already-started transaction directly
 
 await uow.CommitAsync();
+```
+
+```csharp
+// Option 2: set it manually
+var options = new UnitOfWorkOptions
+{
+    InitializationMode = TransactionInitializationMode.Immediate
+};
+
+using var uow = await _uowManager.BeginAsync(options);
 ```
 
 **Characteristics**:
@@ -151,22 +157,23 @@ await uow.CommitAsync();
 
 ### Controlling Through Attributes
 
+:::note
+`UnitOfWorkAttribute` provides two options: `IsReadOnly` (read-only; write operations fail fast) and `IsolationLevel`. To opt out of the unit of work, use `[DisableUnitOfWork]` instead; configure the initialization mode via `UnitOfWorkOptions`.
+:::
+
 ```csharp
-// Controller level: all Actions use immediate initialization
-[UnitOfWork(InitializationMode = TransactionInitializationMode.Immediate)]
-public class CriticalOperationController : ControllerBase
+// Read-only: write operations fail fast
+[UnitOfWork(IsReadOnly = true)]
+public class ReadOnlyController : ControllerBase
 {
     // ...
 }
 
-// Action level: a specific operation uses immediate initialization
-public class OrderController : ControllerBase
+// Custom isolation level
+[UnitOfWork(IsolationLevel = IsolationLevel.Serializable)]
+public class HighConsistencyController : ControllerBase
 {
-    [UnitOfWork(InitializationMode = TransactionInitializationMode.Immediate)]
-    public async Task<IActionResult> CriticalOperation()
-    {
-        // The transaction has already started before the action begins
-    }
+    // ...
 }
 ```
 
@@ -249,28 +256,19 @@ public async Task<IActionResult> HighConsistencyOperation()
 
 ### Read-Only Operation Optimization
 
-MiCake automatically identifies read-only operations (based on the Action name):
+Read-only Action name inference is **off by default**; enable it explicitly (explicit metadata such as `[UnitOfWork(IsReadOnly = true)]` always takes precedence):
 
 ```csharp
-public class OrderController : ControllerBase
-{
-    // Automatically identified as read-only (skips the transaction commit)
-    public async Task<IActionResult> GetOrder(int id) { }
-    public async Task<IActionResult> FindOrders() { }
-    public async Task<IActionResult> QueryOrders() { }
-    public async Task<IActionResult> SearchOrders() { }
-}
-```
-
-You can customize the read-only keywords through configuration:
-
-```csharp
+// Re-enable it if you depend on the old inference behavior:
 services.AddMiCakeWithDefault<MyModule, MyDbContext>(
     miCakeAspNetConfig: options =>
     {
+        options.UnitOfWork.EnableReadOnlyActionNameInference = true;
         options.UnitOfWork.ReadOnlyActionKeywords = ["Get", "Find", "Query", "Search", "List", "Fetch"];
     });
 ```
+
+When enabled, Actions whose names match the keywords are automatically identified as read-only (skipping the transaction commit).
 
 ## Advanced Scenarios
 
@@ -280,7 +278,7 @@ services.AddMiCakeWithDefault<MyModule, MyDbContext>(
 services.AddMiCakeWithDefault<MyModule, MyDbContext>(
     miCakeAspNetConfig: options =>
     {
-        options.UnitOfWork.IsAutoTransactionEnabled = false;
+        options.UnitOfWork.EnableAutoUnitOfWork = false;
     });
 ```
 
@@ -370,8 +368,11 @@ await uow.CommitAsync();
 services.AddMiCakeWithDefault<MyModule, MyDbContext>(
     miCakeAspNetConfig: options =>
     {
-        // Enable/disable the automatic transaction (default: true)
-        options.UnitOfWork.IsAutoTransactionEnabled = true;
+        // Enable/disable the automatic unit of work (default: true)
+        options.UnitOfWork.EnableAutoUnitOfWork = true;
+
+        // Read-only Action name inference (default: false, opt-in)
+        options.UnitOfWork.EnableReadOnlyActionNameInference = false;
 
         // Read-only Action keywords
         options.UnitOfWork.ReadOnlyActionKeywords = ["Find", "Get", "Query", "Search"];
@@ -381,6 +382,14 @@ services.AddMiCakeWithDefault<MyModule, MyDbContext>(
 ### UnitOfWork Options
 
 ```csharp
+// Use the static factories (recommended)
+using var uow = await _uowManager.BeginAsync(UnitOfWorkOptions.Default);      // Lazy default
+using var uow2 = await _uowManager.BeginAsync(UnitOfWorkOptions.Immediate);   // Start the transaction immediately
+using var uow3 = await _uowManager.BeginAsync(UnitOfWorkOptions.ReadOnly);    // Read-only
+```
+
+```csharp
+// Or set the options manually
 var options = new UnitOfWorkOptions
 {
     // Isolation level (default: ReadCommitted)
@@ -390,14 +399,15 @@ var options = new UnitOfWorkOptions
     InitializationMode = TransactionInitializationMode.Lazy,
 
     // Whether it is read-only (default: false)
-    IsReadOnly = false,
-
-    // Timeout in seconds
-    Timeout = 30
+    IsReadOnly = false
 };
 
 using var uow = await _uowManager.BeginAsync(options);
 ```
+
+:::note
+`UnitOfWorkOptions` does not include a timeout setting. Configure timeouts through EF/provider command, lock, or transaction timeout settings instead.
+:::
 
 ## Best Practices
 
@@ -408,9 +418,6 @@ using var uow = await _uowManager.BeginAsync(options);
 ```csharp
 // ✅ Good
 using var uow = await _uowManager.BeginAsync();
-
-// ❌ Avoid (only for backward compatibility)
-using var uow = _uowManager.Begin();
 ```
 
 2. **Use a using statement to ensure Dispose**
@@ -482,7 +489,7 @@ await uow.CommitAsync();
 2. **Do not use a Repository outside of a UoW**
 
 ```csharp
-// ❌ Bad
+// ❌ Bad: operations outside a UoW get no transaction/rollback/lifecycle guarantees
 var order = await _orderRepository.FindAsync(1);  // No UoW context
 
 // ✅ Good
@@ -541,19 +548,29 @@ catch (Exception ex)
 ### ❌ Misusing Nested Transactions
 
 ```csharp
-// Mistake: using requiresNew to create a new transaction
+// Mistake: BeginAsync does not accept a requiresNew parameter
 using var outerUow = await _uowManager.BeginAsync();
-using var innerUow = await _uowManager.BeginAsync(requiresNew: true);
-// This creates two independent transactions, not nested ones
+using var innerUow = await _uowManager.BeginAsync(requiresNew: true);  // ❌ Compile error
+```
+
+For a truly **independent transaction**, use the isolated callback execution `ExecuteRequiresNewAsync` (creates a separate DI scope; commits automatically on success, rolls back on failure):
+
+```csharp
+await _uowManager.ExecuteRequiresNewAsync(async (sp, ct) =>
+{
+    // Resolve services from the callback's provider (capturing outer scoped services fails the ownership check)
+    var repo = sp.GetRequiredService<IRepository<Order, int>>();
+    await repo.AddAsync(order);
+});
 ```
 
 ### ✅ Correct Nesting
 
 ```csharp
-// Correct: do not use the requiresNew parameter
+// Correct: the inner one nests automatically within the outer transaction
 using var outerUow = await _uowManager.BeginAsync();
 using var innerUow = await _uowManager.BeginAsync();
-// The inner one is nested automatically within the outer transaction
+// The inner one is nested automatically within the outer transaction; a nested CommitAsync only marks completion, the physical commit happens at the root UoW
 await innerUow.CommitAsync();
 await outerUow.CommitAsync();
 ```
@@ -574,6 +591,6 @@ By using units of work sensibly, you can:
 - Optimize application performance
 
 Next steps:
-- Learn about [Repositories](../domain-driven/repository/) to understand data access
-- Read about [Domain Events](../domain-driven/domain-event/) to understand event handling
-- Check out [Aggregate Roots](../domain-driven/aggregate-root/) to understand aggregate boundaries
+- Learn about [Repositories](/en/domain-driven/repository/) to understand data access
+- Read about [Domain Events](/en/domain-driven/domain-event/) to understand event handling
+- Check out [Aggregate Roots](/en/domain-driven/aggregate-root/) to understand aggregate boundaries

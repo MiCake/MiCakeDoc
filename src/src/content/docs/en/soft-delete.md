@@ -142,7 +142,9 @@ public async Task<IActionResult> DeleteProduct(int id)
 
     // Soft delete (not actually removed)
     await _productRepository.DeleteAsync(product);
-    await _productRepository.SaveChangesAsync();
+
+    // Commit the unit of work (committed automatically at the request boundary in ASP.NET Core)
+    await _unitOfWork.CommitAsync();
 
     // The IsDeleted field is set to true in the database
     // If IHasDeletedAt is implemented, DeletedAt is set to the current time
@@ -337,6 +339,10 @@ public class DataCleanupService
     }
 }
 ```
+
+:::note
+The example calls `DbContext.SaveChangesAsync()` directly (bypassing repositories/UoW). Direct `DbContext` writes without a UoW are **allowed** with native EF Core semantics (implicit transaction, no rollback/lifecycle guarantees); use the ambient unit of work or `IStandaloneUnitOfWorkExecutor` when transactional guarantees are needed.
+:::
 
 
 ## Important Notes

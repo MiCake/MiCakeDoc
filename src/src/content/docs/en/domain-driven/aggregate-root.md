@@ -439,9 +439,9 @@ public class OrderService
             order.AddItem(item.ProductId, item.ProductName, item.Price, item.Quantity);
         }
 
-        // Persist the aggregate root
+        // Persist the aggregate root (committed by the ambient UoW; domain events are dispatched at commit)
         await _orderRepository.AddAsync(order);
-        await _orderRepository.SaveChangesAsync(); // Domain events are dispatched here automatically
+        await _unitOfWork.CommitAsync();
 
         return order.Id;
     }
@@ -456,8 +456,8 @@ public class OrderService
         // Execute the domain operation
         order.Confirm();
 
-        // Save changes
-        await _orderRepository.SaveChangesAsync();
+        // Commit the changes (via the ambient UoW)
+        await _unitOfWork.CommitAsync();
     }
 }
 ```
@@ -482,6 +482,6 @@ public class OrderService
 
 ## Next Steps
 
-- Learn how to use [Repositories](../domain-driven/repository/) to persist aggregate roots
-- Learn about [Domain Events](../domain-driven/domain-event/) for cross-aggregate operations
-- Explore [Unit of Work](../domain-driven/unit-of-work/) to manage transactions
+- Learn how to use [Repositories](/en/domain-driven/repository/) to persist aggregate roots
+- Learn about [Domain Events](/en/domain-driven/domain-event/) for cross-aggregate operations
+- Explore [Unit of Work](/en/domain-driven/unit-of-work/) to manage transactions

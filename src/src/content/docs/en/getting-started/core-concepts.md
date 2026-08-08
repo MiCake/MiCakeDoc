@@ -152,11 +152,14 @@ public interface IRepository<TAggregateRoot, TKey>
 {
     Task<TAggregateRoot> FindAsync(TKey id);
     Task AddAsync(TAggregateRoot aggregateRoot);
+    Task AddAndGetIdAsync(TAggregateRoot aggregateRoot);
     Task UpdateAsync(TAggregateRoot aggregateRoot);
     Task DeleteAsync(TAggregateRoot aggregateRoot);
-    Task<int> SaveChangesAsync();
+    Task DeleteByIdAsync(TKey id);
 }
 ```
+
+> **Repositories no longer own persistence**: repository methods only modify the tracking state of the Unit of Work; data is committed by `IUnitOfWork.CommitAsync()`.
 
 ### Repositories Are Only for Aggregate Roots
 
@@ -218,7 +221,7 @@ public class Order : AggregateRoot<int>
 // 3. Handle the event
 public class OrderPlacedEventHandler : IDomainEventHandler<OrderPlacedEvent>
 {
-    public Task HandleAysnc(OrderPlacedEvent domainEvent, CancellationToken cancellationToken)
+    public Task HandleAsync(OrderPlacedEvent domainEvent, CancellationToken cancellationToken)
     {
         // Send email notification
         // Update inventory
@@ -230,14 +233,14 @@ public class OrderPlacedEventHandler : IDomainEventHandler<OrderPlacedEvent>
 
 ### Automatic Event Dispatch
 
-Domain events are dispatched automatically when `SaveChangesAsync` is called:
+Domain events are dispatched automatically when the **unit of work commits** (`IUnitOfWork.CommitAsync()`):
 
 ```csharp
 var order = Order.Create(customer);
 order.PlaceOrder();  // Raises the event, but does not dispatch immediately
 
 await repository.AddAsync(order);
-await repository.SaveChangesAsync();  // All events are dispatched here
+await unitOfWork.CommitAsync();  // All events are dispatched here
 ```
 
 ## Unit of Work
@@ -277,7 +280,6 @@ public class OrderController : ControllerBase
         }
         
         await _orderRepository.AddAsync(order);
-        await _orderRepository.SaveChangesAsync();
 
         // 2. Update product inventory
         foreach (var item in dto.Items)
@@ -285,10 +287,8 @@ public class OrderController : ControllerBase
             var product = await _productRepository.FindAsync(item.ProductId);
             product.DecreaseStock(item.Quantity);
         }
-        
-        await _productRepository.SaveChangesAsync();
 
-        // When the method returns normally, the transaction is committed automatically
+        // When the method returns normally, the UoW commits the transaction automatically
         // If an exception is thrown, the transaction is rolled back automatically
         return Ok(order.Id);
     }

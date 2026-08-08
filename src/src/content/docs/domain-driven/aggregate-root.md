@@ -439,9 +439,9 @@ public class OrderService
             order.AddItem(item.ProductId, item.ProductName, item.Price, item.Quantity);
         }
 
-        // 持久化聚合根
+        // 持久化聚合根（由环境 UoW 统一提交；领域事件在提交时自动分发）
         await _orderRepository.AddAsync(order);
-        await _orderRepository.SaveChangesAsync(); // 领域事件在此时自动分发
+        await _unitOfWork.CommitAsync();
 
         return order.Id;
     }
@@ -456,8 +456,8 @@ public class OrderService
         // 执行领域操作
         order.Confirm();
 
-        // 保存更改
-        await _orderRepository.SaveChangesAsync();
+        // 提交更改（由 UoW 统一提交）
+        await _unitOfWork.CommitAsync();
     }
 }
 ```
@@ -482,6 +482,6 @@ public class OrderService
 
 ## 下一步
 
-- 了解如何使用[仓储](./仓储.md)持久化聚合根
-- 学习[领域事件](./领域事件.md)处理跨聚合操作
-- 探索[工作单元](./工作单元.md)管理事务
+- 了解如何使用[仓储](/domain-driven/repository/)持久化聚合根
+- 学习[领域事件](/domain-driven/domain-event/)处理跨聚合操作
+- 探索[工作单元](/domain-driven/unit-of-work/)管理事务

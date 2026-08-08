@@ -103,18 +103,16 @@ When entities are saved, the audit fields are filled automatically:
 // Create an entity
 var article = new Article { Title = "My Article" };
 await _articleRepository.AddAsync(article);
-await _articleRepository.SaveChangesAsync();
-// CreatedAt is automatically set to the current time
+await _unitOfWork.CommitAsync();   // CreatedAt is automatically set to the current time at commit
 
 // Update an entity
 article.UpdateTitle("New Title");
 await _articleRepository.UpdateAsync(article);
-await _articleRepository.SaveChangesAsync();
-// UpdatedAt is automatically updated to the current time
+await _unitOfWork.CommitAsync();   // UpdatedAt is automatically updated to the current time at commit
 ```
 
 :::note
-The auditing feature is implemented through `IAuditExecutor` and `IAuditProvider`, and is triggered automatically in the Repository's `SaveChangesAsync`.
+The auditing feature is implemented through `IAuditExecutor` (framework-internal) and `IAuditProvider`, and is triggered automatically at the **unit of work commit** (flush/commit).
 :::
 
 ## Custom Audit Providers
@@ -360,8 +358,8 @@ MiCake's auditing feature is implemented through the following components:
 
 1. **IAuditProvider**: The audit provider interface, which defines audit logic
 2. **DefaultTimeAuditProvider**: The default time audit provider, which handles creation and modification times
-3. **IAuditExecutor**: The audit executor, which invokes all registered audit providers
-4. **AuditRepositoryLifetime**: A Repository lifecycle hook that automatically executes auditing before `SaveChangesAsync`
+3. **IAuditExecutor**: The audit executor (framework-internal), which invokes all registered audit providers
+4. **AuditRepositoryLifetime**: A Repository lifecycle hook (framework-internal) that automatically executes auditing before the unit of work commits (flush/commit)
 
 Auditing only takes effect on entities that implement MiCake's DDD domain object interfaces (such as `Entity` and `AggregateRoot`).
 
@@ -371,7 +369,7 @@ Features of the MiCake automatic auditing feature:
 
 - **Easy to use**: Implement an interface to enable auditing, no manual time setting required
 - **Flexible configuration**: Supports custom time providers and audit providers
-- **Automatic triggering**: Audit fields are filled automatically on `SaveChangesAsync`
+- **Automatic triggering**: Audit fields are filled automatically at the unit of work commit (flush/commit)
 - **Multiple providers**: Supports registering multiple audit providers, executed in order
 - **Soft deletion support**: Built-in soft deletion, marks deletion instead of physical deletion
 - **Type safety**: Interface-based design, checked at compile time

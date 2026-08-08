@@ -137,7 +137,7 @@ public class OrderSubmittedEventHandler : IDomainEventHandler<OrderSubmittedEven
         _logger = logger;
     }
 
-    public async Task HandleAysnc(OrderSubmittedEvent domainEvent, CancellationToken cancellationToken = default)
+    public async Task HandleAsync(OrderSubmittedEvent domainEvent, CancellationToken cancellationToken = default)
     {
         _logger.LogInformation($"Order {domainEvent.OrderId} submitted by customer {domainEvent.CustomerId}");
 
@@ -158,7 +158,7 @@ public class UserRegisteredEventHandler : IDomainEventHandler<UserRegisteredEven
     private readonly IEmailService _emailService;
     private readonly IRepository<UserProfile, int> _profileRepository;
 
-    public async Task HandleAysnc(UserRegisteredEvent domainEvent, CancellationToken cancellationToken = default)
+    public async Task HandleAsync(UserRegisteredEvent domainEvent, CancellationToken cancellationToken = default)
     {
         // 1. 发送欢迎邮件
         await _emailService.SendWelcomeEmailAsync(domainEvent.Email);
@@ -166,7 +166,7 @@ public class UserRegisteredEventHandler : IDomainEventHandler<UserRegisteredEven
         // 2. 创建用户档案
         var profile = UserProfile.Create(domainEvent.UserId);
         await _profileRepository.AddAsync(profile, cancellationToken);
-        await _profileRepository.SaveChangesAsync(cancellationToken);
+        // 变更由环境 UoW 统一提交，无需手动保存
 
         // 3. 记录日志
         Console.WriteLine($"User {domainEvent.UserId} registered at {domainEvent.RegisteredAt}");
@@ -182,7 +182,7 @@ public class UserRegisteredEventHandler : IDomainEventHandler<UserRegisteredEven
 // 处理器 1：发送邮件
 public class OrderSubmittedEmailHandler : IDomainEventHandler<OrderSubmittedEvent>
 {
-    public async Task HandleAysnc(OrderSubmittedEvent domainEvent, CancellationToken cancellationToken)
+    public async Task HandleAsync(OrderSubmittedEvent domainEvent, CancellationToken cancellationToken)
     {
         // 发送邮件
     }
@@ -191,7 +191,7 @@ public class OrderSubmittedEmailHandler : IDomainEventHandler<OrderSubmittedEven
 // 处理器 2：更新库存
 public class OrderSubmittedInventoryHandler : IDomainEventHandler<OrderSubmittedEvent>
 {
-    public async Task HandleAysnc(OrderSubmittedEvent domainEvent, CancellationToken cancellationToken)
+    public async Task HandleAsync(OrderSubmittedEvent domainEvent, CancellationToken cancellationToken)
     {
         // 扣减库存
     }
@@ -200,7 +200,7 @@ public class OrderSubmittedInventoryHandler : IDomainEventHandler<OrderSubmitted
 // 处理器 3：记录日志
 public class OrderSubmittedLoggingHandler : IDomainEventHandler<OrderSubmittedEvent>
 {
-    public async Task HandleAysnc(OrderSubmittedEvent domainEvent, CancellationToken cancellationToken)
+    public async Task HandleAsync(OrderSubmittedEvent domainEvent, CancellationToken cancellationToken)
     {
         // 记录日志
     }
@@ -211,12 +211,13 @@ public class OrderSubmittedLoggingHandler : IDomainEventHandler<OrderSubmittedEv
 
 ## 事件的自动派发
 
-MiCake 在调用 `SaveChangesAsync()` 时自动派发领域事件：
+MiCake 在**工作单元提交**（`IUnitOfWork.CommitAsync()`）时自动派发领域事件：
 
 ```csharp
 public class OrderService
 {
     private readonly IRepository<Order, int> _orderRepository;
+    private readonly IUnitOfWork _unitOfWork;
 
     public async Task SubmitOrder(int orderId)
     {
@@ -229,11 +230,11 @@ public class OrderService
         // 3. 更新聚合根
         await _orderRepository.UpdateAsync(order);
 
-        // 4. 保存更改 - 此时自动派发所有事件
-        await _orderRepository.SaveChangesAsync();
-        // SaveChangesAsync 内部流程：
+        // 4. 提交工作单元 - 此时自动派发所有事件
+        await _unitOfWork.CommitAsync();
+        // CommitAsync 内部流程：
         // a. 收集聚合根上的所有待处理事件
-        // b. 持久化数据到数据库
+        // b. 持久化数据到数据库（flush）
         // c. 按顺序派发事件到对应的处理器
         // d. 清除已派发的事件
     }
@@ -252,8 +253,8 @@ public class OrderService
 3. 事件暂存在聚合根
    _domainEvents.Add(event)
       ↓
-4. 保存更改
-   await repository.SaveChangesAsync()
+4. 提交工作单元
+   await unitOfWork.CommitAsync()
       ↓
 5. 收集所有事件
    events = aggregateRoot.DomainEvents
@@ -292,7 +293,7 @@ public class OrderSubmittedInventoryHandler : IDomainEventHandler<OrderSubmitted
 {
     private readonly IRepository<Product, int> _productRepository;
 
-    public async Task HandleAysnc(OrderSubmittedEvent domainEvent, CancellationToken cancellationToken)
+    public async Task HandleAsync(OrderSubmittedEvent domainEvent, CancellationToken cancellationToken)
     {
         // 扣减库存
         foreach (var item in domainEvent.Items)
@@ -302,7 +303,7 @@ public class OrderSubmittedInventoryHandler : IDomainEventHandler<OrderSubmitted
             await _productRepository.UpdateAsync(product);
         }
 
-        await _productRepository.SaveChangesAsync(cancellationToken);
+        // 变更由环境 UoW 统一提交
     }
 }
 ```
@@ -328,7 +329,7 @@ public class User : AggregateRoot<int>
 // 多个处理器协调完成注册流程
 public class SendVerificationEmailHandler : IDomainEventHandler<UserRegisteredEvent>
 {
-    public async Task HandleAysnc(UserRegisteredEvent domainEvent, CancellationToken cancellationToken)
+    public async Task HandleAsync(UserRegisteredEvent domainEvent, CancellationToken cancellationToken)
     {
         // 发送验证邮件
     }
@@ -336,7 +337,7 @@ public class SendVerificationEmailHandler : IDomainEventHandler<UserRegisteredEv
 
 public class CreateUserProfileHandler : IDomainEventHandler<UserRegisteredEvent>
 {
-    public async Task HandleAysnc(UserRegisteredEvent domainEvent, CancellationToken cancellationToken)
+    public async Task HandleAsync(UserRegisteredEvent domainEvent, CancellationToken cancellationToken)
     {
         // 创建用户档案
     }
@@ -344,7 +345,7 @@ public class CreateUserProfileHandler : IDomainEventHandler<UserRegisteredEvent>
 
 public class InitializeUserSettingsHandler : IDomainEventHandler<UserRegisteredEvent>
 {
-    public async Task HandleAysnc(UserRegisteredEvent domainEvent, CancellationToken cancellationToken)
+    public async Task HandleAsync(UserRegisteredEvent domainEvent, CancellationToken cancellationToken)
     {
         // 初始化用户设置
     }
@@ -366,7 +367,7 @@ public class OrderAuditEventHandler : IDomainEventHandler<OrderStatusChangedEven
 {
     private readonly IAuditLogRepository _auditRepository;
 
-    public async Task HandleAysnc(OrderStatusChangedEvent domainEvent, CancellationToken cancellationToken)
+    public async Task HandleAsync(OrderStatusChangedEvent domainEvent, CancellationToken cancellationToken)
     {
         var auditLog = new AuditLog
         {
@@ -379,7 +380,7 @@ public class OrderAuditEventHandler : IDomainEventHandler<OrderStatusChangedEven
         };
 
         await _auditRepository.AddAsync(auditLog);
-        await _auditRepository.SaveChangesAsync(cancellationToken);
+        // 变更由环境 UoW 统一提交，无需手动保存
     }
 }
 ```
@@ -398,7 +399,7 @@ public class OrderShippedNotificationHandler : IDomainEventHandler<OrderShippedE
 {
     private readonly INotificationService _notificationService;
 
-    public async Task HandleAysnc(OrderShippedEvent domainEvent, CancellationToken cancellationToken)
+    public async Task HandleAsync(OrderShippedEvent domainEvent, CancellationToken cancellationToken)
     {
         // 发送邮件通知
         await _notificationService.SendEmailAsync(
@@ -471,7 +472,7 @@ public class OrderCreatedEmailHandler : IDomainEventHandler<OrderCreatedEvent>
     private readonly IEmailService _emailService;
     private readonly IEmailLogRepository _emailLogRepository;
 
-    public async Task HandleAysnc(OrderCreatedEvent domainEvent, CancellationToken cancellationToken)
+    public async Task HandleAsync(OrderCreatedEvent domainEvent, CancellationToken cancellationToken)
     {
         // 检查是否已发送（幂等性）
         var alreadySent = await _emailLogRepository.ExistsAsync(
@@ -491,8 +492,7 @@ public class OrderCreatedEmailHandler : IDomainEventHandler<OrderCreatedEvent>
             Type = "OrderCreated",
             SentAt = DateTime.UtcNow
         });
-
-        await _emailLogRepository.SaveChangesAsync(cancellationToken);
+        // 变更由环境 UoW 统一提交，无需手动保存
     }
 }
 ```
@@ -527,7 +527,7 @@ public class OrderSubmittedEvent : IDomainEvent
 // ❌ 避免 - 同步执行耗时操作
 public class OrderPlacedHandler : IDomainEventHandler<OrderPlacedEvent>
 {
-    public async Task HandleAysnc(OrderPlacedEvent domainEvent, CancellationToken cancellationToken)
+    public async Task HandleAsync(OrderPlacedEvent domainEvent, CancellationToken cancellationToken)
     {
         // 这会阻塞事务
         await SendEmailAsync();  // 可能很慢
@@ -541,7 +541,7 @@ public class OrderPlacedHandler : IDomainEventHandler<OrderPlacedEvent>
 {
     private readonly IMessageQueue _messageQueue;
 
-    public async Task HandleAysnc(OrderPlacedEvent domainEvent, CancellationToken cancellationToken)
+    public async Task HandleAsync(OrderPlacedEvent domainEvent, CancellationToken cancellationToken)
     {
         // 快速发布到队列
         await _messageQueue.PublishAsync(new SendOrderEmailCommand(domainEvent.OrderId));
@@ -557,7 +557,7 @@ MiCake 的领域事件机制：
 - 实现 `IDomainEvent` 接口定义事件
 - 在聚合根中通过 `RaiseDomainEvent` 触发事件
 - 实现 `IDomainEventHandler<TEvent>` 处理事件
-- 在 `SaveChangesAsync` 时自动派发事件
+- 在**工作单元提交**（`CommitAsync`/`FlushAsync`）时自动派发事件
 - 用于实现聚合间松耦合通信
 - 支持一个事件多个处理器
 

@@ -18,7 +18,7 @@ description: 使用工作单元模式管理事务和保证数据一致性
 
 ###  ASP.NET Core 应用中的自动工作单元（推荐）
 
-当你使用了`MiCake.AspNetCore`模块时，当`MiCakeAspNetUowOption.IsAutoUowEnabled`选项被启用时（默认为true），工作单元会在每次 HTTP 请求开始时自动创建，并在请求结束时自动提交或回滚，用户无须关心工作单元的生命周期管理。
+当你使用了`MiCake.AspNetCore`模块时，当`MiCakeAspNetUowOptions.EnableAutoUnitOfWork`选项被启用时（默认为true），工作单元会在每次 HTTP 请求开始时自动创建，并在请求结束时自动提交或回滚，用户无须关心工作单元的生命周期管理。
 
 ```csharp
 // Startup.cs 或 Program.cs， 默认开启自动工作单元
@@ -29,7 +29,7 @@ services.AddMiCakeWithDefault<MyModule, MyDbContext>(options =>
 {
     options.AspNetConfig = asp =>
     {
-        asp.UnitOfWork.IsAutoUowEnabled = false;
+        asp.UnitOfWork.EnableAutoUnitOfWork = false;
     };
 });
 ```
@@ -39,9 +39,9 @@ services.AddMiCakeWithDefault<MyModule, MyDbContext>(options =>
 ```csharp
 public class OrderController : ControllerBase
 {
-    private readonly IRepository<Order> _orderRepository;
+    private readonly IRepository<Order, int> _orderRepository;
 
-    public OrderController(IRepository<Order> orderRepository)
+    public OrderController(IRepository<Order, int> orderRepository)
     {
         _orderRepository = orderRepository;
     }
@@ -67,11 +67,11 @@ public class OrderController : ControllerBase
 public class OrderService
 {
     private readonly IUnitOfWorkManager _uowManager;
-    private readonly IRepository<Order> _orderRepository;
+    private readonly IRepository<Order, int> _orderRepository;
 
     public OrderService(
         IUnitOfWorkManager uowManager,
-        IRepository<Order> orderRepository)
+        IRepository<Order, int> orderRepository)
     {
         _uowManager = uowManager;
         _orderRepository = orderRepository;
@@ -117,21 +117,27 @@ await uow.CommitAsync();
 
 ### Immediate 模式
 
-事务在创建工作单元时立即开启：
+使用 `UnitOfWorkOptions.Immediate` 静态工厂，或手动设置初始化模式：
 
 ```csharp
-var options = new UnitOfWorkOptions
-{
-    InitializationMode = TransactionInitializationMode.Immediate
-};
-
-using var uow = await _uowManager.BeginAsync(options);
+// 方式一：使用静态工厂（推荐）
+using var uow = await _uowManager.BeginAsync(UnitOfWorkOptions.Immediate);
 // 事务立即开启
 
 var order = await _orderRepository.FindAsync(1);
 // 直接使用已开启的事务
 
 await uow.CommitAsync();
+```
+
+```csharp
+// 方式二：手动设置
+var options = new UnitOfWorkOptions
+{
+    InitializationMode = TransactionInitializationMode.Immediate
+};
+
+using var uow = await _uowManager.BeginAsync(options);
 ```
 
 **特点**：
@@ -151,22 +157,23 @@ await uow.CommitAsync();
 
 ### 通过 Attribute 控制
 
+:::note
+`UnitOfWorkAttribute` 提供两个选项：`IsReadOnly`（只读，写操作快速失败）与 `IsolationLevel`（隔离级别）。禁用工作单元请改用 `[DisableUnitOfWork]`，初始化模式请在 `UnitOfWorkOptions` 中配置。
+:::
+
 ```csharp
-// Controller 级别：所有 Action 使用立即初始化
-[UnitOfWork(InitializationMode = TransactionInitializationMode.Immediate)]
-public class CriticalOperationController : ControllerBase
+// 只读：写操作快速失败
+[UnitOfWork(IsReadOnly = true)]
+public class ReadOnlyController : ControllerBase
 {
     // ...
 }
 
-// Action 级别：特定操作使用立即初始化
-public class OrderController : ControllerBase
+// 自定义隔离级别
+[UnitOfWork(IsolationLevel = IsolationLevel.Serializable)]
+public class HighConsistencyController : ControllerBase
 {
-    [UnitOfWork(InitializationMode = TransactionInitializationMode.Immediate)]
-    public async Task<IActionResult> CriticalOperation()
-    {
-        // 事务在 action 开始前就已开启
-    }
+    // ...
 }
 ```
 
@@ -249,28 +256,19 @@ public async Task<IActionResult> HighConsistencyOperation()
 
 ### 只读操作优化
 
-MiCake 会自动识别只读操作（根据 Action 名称）：
+只读 Action 名称推断默认**关闭**，需要显式开启（显式元数据如 `[UnitOfWork(IsReadOnly = true)]` 始终优先）：
 
 ```csharp
-public class OrderController : ControllerBase
-{
-    // 自动识别为只读（跳过事务提交）
-    public async Task<IActionResult> GetOrder(int id) { }
-    public async Task<IActionResult> FindOrders() { }
-    public async Task<IActionResult> QueryOrders() { }
-    public async Task<IActionResult> SearchOrders() { }
-}
-```
-
-可通过配置自定义只读关键字：
-
-```csharp
+// 依赖旧推断行为时重新开启：
 services.AddMiCakeWithDefault<MyModule, MyDbContext>(
     miCakeAspNetConfig: options =>
     {
+        options.UnitOfWork.EnableReadOnlyActionNameInference = true;
         options.UnitOfWork.ReadOnlyActionKeywords = ["Get", "Find", "Query", "Search", "List", "Fetch"];
     });
 ```
+
+开启后，名称匹配关键字的 Action 会被自动识别为只读（跳过事务提交）。
 
 ## 高级场景
 
@@ -280,7 +278,7 @@ services.AddMiCakeWithDefault<MyModule, MyDbContext>(
 services.AddMiCakeWithDefault<MyModule, MyDbContext>(
     miCakeAspNetConfig: options =>
     {
-        options.UnitOfWork.IsAutoTransactionEnabled = false;
+        options.UnitOfWork.EnableAutoUnitOfWork = false;
     });
 ```
 
@@ -370,8 +368,11 @@ await uow.CommitAsync();
 services.AddMiCakeWithDefault<MyModule, MyDbContext>(
     miCakeAspNetConfig: options =>
     {
-        // 启用/禁用自动事务（默认：true）
-        options.UnitOfWork.IsAutoTransactionEnabled = true;
+        // 启用/禁用自动工作单元（默认：true）
+        options.UnitOfWork.EnableAutoUnitOfWork = true;
+
+        // 只读 Action 名称推断（默认：false，需显式开启）
+        options.UnitOfWork.EnableReadOnlyActionNameInference = false;
 
         // 只读 Action 关键字
         options.UnitOfWork.ReadOnlyActionKeywords = ["Find", "Get", "Query", "Search"];
@@ -381,6 +382,14 @@ services.AddMiCakeWithDefault<MyModule, MyDbContext>(
 ### UnitOfWork 选项
 
 ```csharp
+// 使用静态工厂（推荐）
+using var uow = await _uowManager.BeginAsync(UnitOfWorkOptions.Default);      // Lazy 默认
+using var uow2 = await _uowManager.BeginAsync(UnitOfWorkOptions.Immediate);   // 立即开启事务
+using var uow3 = await _uowManager.BeginAsync(UnitOfWorkOptions.ReadOnly);    // 只读
+```
+
+```csharp
+// 或手动设置
 var options = new UnitOfWorkOptions
 {
     // 隔离级别（默认：ReadCommitted）
@@ -390,14 +399,15 @@ var options = new UnitOfWorkOptions
     InitializationMode = TransactionInitializationMode.Lazy,
 
     // 是否只读（默认：false）
-    IsReadOnly = false,
-
-    // 超时时间（秒）
-    Timeout = 30
+    IsReadOnly = false
 };
 
 using var uow = await _uowManager.BeginAsync(options);
 ```
+
+:::note
+`UnitOfWorkOptions` 不含超时配置。超时请使用 EF/provider 的命令、锁、事务超时配置。
+:::
 
 ## 最佳实践
 
@@ -408,9 +418,6 @@ using var uow = await _uowManager.BeginAsync(options);
 ```csharp
 // ✅ 好
 using var uow = await _uowManager.BeginAsync();
-
-// ❌ 避免（仅用于向后兼容）
-using var uow = _uowManager.Begin();
 ```
 
 2. **使用 using 语句确保 Dispose**
@@ -482,8 +489,8 @@ await uow.CommitAsync();
 2. **不要在 UoW 外部使用 Repository**
 
 ```csharp
-// ❌ 差
-var order = await _orderRepository.FindAsync(1);  // 没有 UoW 上下文
+// ❌ 差：UoW 外的操作无法获得事务/回滚/生命周期保证
+var order = await _orderRepository.FindAsync(1);  // 无 UoW 上下文
 
 // ✅ 好
 using var uow = await _uowManager.BeginAsync();
@@ -541,19 +548,29 @@ catch (Exception ex)
 ### ❌ 嵌套事务误用
 
 ```csharp
-// 错误：使用 requiresNew 创建新事务
+// 错误：BeginAsync 不接受 requiresNew 参数
 using var outerUow = await _uowManager.BeginAsync();
-using var innerUow = await _uowManager.BeginAsync(requiresNew: true);
-// 这会创建两个独立的事务，而不是嵌套
+using var innerUow = await _uowManager.BeginAsync(requiresNew: true);  // ❌ 编译错误
+```
+
+需要真正的**独立事务**时，使用隔离回调执行 `ExecuteRequiresNewAsync`（创建独立 DI 作用域，成功自动提交、失败自动回滚）：
+
+```csharp
+await _uowManager.ExecuteRequiresNewAsync(async (sp, ct) =>
+{
+    // 必须从回调的 provider 解析服务（捕获外层 scoped 服务会触发所有权校验失败）
+    var repo = sp.GetRequiredService<IRepository<Order, int>>();
+    await repo.AddAsync(order);
+});
 ```
 
 ### ✅ 正确的嵌套
 
 ```csharp
-// 正确：不使用 requiresNew 参数
+// 正确：内层自动嵌套在外层事务中
 using var outerUow = await _uowManager.BeginAsync();
 using var innerUow = await _uowManager.BeginAsync();
-// 内层会自动嵌套在外层事务中
+// 内层会自动嵌套在外层事务中；嵌套 CommitAsync 只标记完成，物理提交发生在根 UoW
 await innerUow.CommitAsync();
 await outerUow.CommitAsync();
 ```

@@ -31,11 +31,15 @@ public interface IRepository<TAggregateRoot, TKey>
     // Query
     IQueryable<TAggregateRoot> Query();
     Task<TAggregateRoot?> FindAsync(TKey id, CancellationToken cancellationToken = default);
+    Task<TAggregateRoot?> FindAsync(
+        TKey id,
+        Func<IQueryable<TAggregateRoot>, IQueryable<TAggregateRoot>> includeFunc,
+        CancellationToken cancellationToken = default);
     Task<long> GetCountAsync(CancellationToken cancellationToken = default);
 
     // Add
     Task AddAsync(TAggregateRoot aggregateRoot, CancellationToken cancellationToken = default);
-    Task<TAggregateRoot> AddAndReturnAsync(TAggregateRoot aggregateRoot, bool saveNow = true, CancellationToken cancellationToken = default);
+    Task<TKey> AddAndGetIdAsync(TAggregateRoot aggregateRoot, CancellationToken cancellationToken = default);
 
     // Update
     Task UpdateAsync(TAggregateRoot aggregateRoot, CancellationToken cancellationToken = default);
@@ -43,11 +47,12 @@ public interface IRepository<TAggregateRoot, TKey>
     // Delete
     Task DeleteAsync(TAggregateRoot aggregateRoot, CancellationToken cancellationToken = default);
     Task DeleteByIdAsync(TKey id, CancellationToken cancellationToken = default);
-
-    // Save
-    Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }
 ```
+
+:::note
+**Repositories no longer own persistence.** Repository methods only modify the tracking state of the ambient Unit of Work; the actual database commit is performed by `IUnitOfWork.CommitAsync()`. `SaveChangesAsync`, `AddAndReturnAsync`, the `saveNow` parameter, and `ClearChangeTrackingAsync` are not part of the repository API. See the [migration guide](/en/migration/v10-to-v11) for details.
+:::
 
 ### The IReadOnlyRepository Interface
 
@@ -130,6 +135,10 @@ public class OrderService
 
 ## Repository Operations
 
+:::note
+In the examples below, `_unitOfWork` is the injected ambient unit of work (`IUnitOfWork`). In ASP.NET Core applications the unit of work is created and committed automatically at the request boundary, so the manual `CommitAsync()` call can be omitted; in non-Web scenarios or when precise control is needed, create it manually via `IUnitOfWorkManager.BeginAsync()` and commit it.
+:::
+
 ### 1. Adding an Aggregate Root
 
 ```csharp
@@ -139,12 +148,12 @@ public async Task CreateOrder(CreateOrderDto dto)
     var order = Order.Create(dto.CustomerId);
     order.AddItem(dto.ProductId, dto.Quantity, dto.Price);
 
-    // Add to the repository
+    // Add to the repository (only modifies UoW tracking state - nothing is persisted yet)
     await _orderRepository.AddAsync(order);
 
-    // Save changes
-    await _orderRepository.SaveChangesAsync();
-    // SaveChangesAsync will:
+    // Commit via the ambient unit of work (automatic in ASP.NET Core, or manual CommitAsync)
+    await _unitOfWork.CommitAsync();
+    // CommitAsync will:
     // 1. Persist the aggregate root
     // 2. Automatically dispatch domain events
     // 3. Update audit fields
@@ -153,19 +162,28 @@ public async Task CreateOrder(CreateOrderDto dto)
 
 ### 2. Adding and Returning (Getting the Auto-Increment ID)
 
+If you need to obtain the database-generated key (e.g., an auto-increment ID) before committing, use `AddAndGetIdAsync`:
+
 ```csharp
-public async Task<Order> CreateOrderAndReturn(CreateOrderDto dto)
+public async Task<int> CreateOrderAndReturn(CreateOrderDto dto)
 {
     var order = Order.Create(dto.CustomerId);
     order.AddItem(dto.ProductId, dto.Quantity, dto.Price);
 
-    // Add and save immediately, returning the object with the generated ID
-    var savedOrder = await _orderRepository.AddAndReturnAsync(order, saveNow: true);
+    // Add and flush to fill the generated key, returning TKey (the transaction is not committed)
+    var orderId = await _orderRepository.AddAndGetIdAsync(order);
 
-    Console.WriteLine($"New order ID: {savedOrder.Id}");
-    return savedOrder;
+    Console.WriteLine($"New order ID: {orderId}");
+
+    // Data is persisted only after the commit
+    await _unitOfWork.CommitAsync();
+    return orderId;
 }
 ```
+
+:::note
+`AddAndGetIdAsync` internally performs `AddAsync` + `FlushAsync` to fill the generated key and requires an ambient **writable** unit of work, otherwise it throws `InvalidOperationException`. In interface-injection scenarios, `AddAsync` + `IUnitOfWork.FlushAsync()` is equivalent.
+:::
 
 ### 3. Querying an Aggregate Root
 
@@ -205,34 +223,45 @@ public async Task<List<Order>> GetCustomerOrders(int customerId)
 ```csharp
 public async Task UpdateOrder(int orderId, UpdateOrderDto dto)
 {
-    // Load the aggregate root
+    // Load the aggregate root (the load-and-modify workflow is recommended)
     var order = await _orderRepository.FindAsync(orderId);
     if (order == null)
         throw new DomainException("Order not found");
 
     // Modify through the aggregate root's methods
     order.UpdateShippingAddress(dto.ShippingAddress);
+
+    // Committed by the UoW (automatic in ASP.NET Core, or manual CommitAsync)
+    await _unitOfWork.CommitAsync();
 }
 ```
+
+:::note
+Calling `UpdateAsync` on an **untracked instance** performs a **full detached aggregate replacement**: all properties of the instance are written. Configured concurrency tokens are preserved, so stale instances surface `DbUpdateConcurrencyException` at flush/commit time instead of being silently overwritten.
+:::
 
 ### 5. Deleting an Aggregate Root
 
 ```csharp
 public async Task DeleteOrder(int orderId)
 {
-    // Option 1: load first, then delete
+    // Option 1: load first, then delete (tracked delete - soft delete/audit/domain events/rollback semantics identical to DeleteAsync)
     var order = await _orderRepository.FindAsync(orderId);
     if (order != null)
     {
         await _orderRepository.DeleteAsync(order);
-        await _orderRepository.SaveChangesAsync();
+        await _unitOfWork.CommitAsync();
     }
 
-    // Option 2: delete directly by ID
+    // Option 2: delete directly by ID (loads into a stable UoW context first, then performs a tracked delete)
     await _orderRepository.DeleteByIdAsync(orderId);
-    await _orderRepository.SaveChangesAsync();
+    await _unitOfWork.CommitAsync();
 }
 ```
+
+:::note
+To bypass the aggregate lifecycle and perform an **immediate physical delete**, use the explicit physical operation executor `IEFCorePhysicalOperationExecutor<TDbContext>` instead (see the [migration guide](/en/migration/v10-to-v11)).
+:::
 
 ## Complex Queries
 
@@ -317,7 +346,7 @@ public async Task<Order?> GetOrderWithFullDetails(int orderId)
 
 ## Automatic Domain Event Dispatch
 
-MiCake automatically dispatches domain events when `SaveChangesAsync` is called:
+MiCake automatically dispatches domain events when the **unit of work commits** (`IUnitOfWork.CommitAsync()`):
 
 ```csharp
 public async Task SubmitOrder(int orderId)
@@ -331,12 +360,12 @@ public async Task SubmitOrder(int orderId)
 
     await _orderRepository.UpdateAsync(order);
 
-    // SaveChangesAsync will automatically:
+    // CommitAsync will automatically:
     // 1. Persist the data
     // 2. Collect all domain events on the aggregate root
     // 3. Dispatch events to the corresponding handlers in order
     // 4. Clear the dispatched events
-    await _orderRepository.SaveChangesAsync();
+    await _unitOfWork.CommitAsync();
 
     // At this point OrderSubmittedEvent has been handled
 }
@@ -361,7 +390,7 @@ public async Task DeleteProduct(int productId)
     
     // Calling DeleteAsync sets IsDeleted = true
     await _productRepository.DeleteAsync(product);
-    await _productRepository.SaveChangesAsync();
+    await _unitOfWork.CommitAsync();
     
     // The product is not physically deleted; it is only marked as deleted
 }
@@ -394,13 +423,13 @@ public class Article : AggregateRoot<int>, IHasCreationTime, IHasModificationTim
 // On creation
 var article = Article.Create("My Article");
 await _articleRepository.AddAsync(article);
-await _articleRepository.SaveChangesAsync();
+await _unitOfWork.CommitAsync();
 // CreatedTime is automatically set to the current time
 
 // On update
 article.UpdateTitle("New Title");
 await _articleRepository.UpdateAsync(article);
-await _articleRepository.SaveChangesAsync();
+await _unitOfWork.CommitAsync();
 // ModifiedTime is automatically updated to the current time
 ```
 
@@ -443,9 +472,9 @@ public async Task<List<Order>> GetOrdersByRawFilter(string filter)
 
 ## Frequently Asked Questions
 
-### Q: When does the repository automatically dispatch domain events?
+### Q: When are domain events dispatched automatically?
 
-A: All pending events on aggregate roots are dispatched automatically when `SaveChangesAsync()` is called. If you use the default `MiCake.AspNetCore` module integration and the `IsAutoUowEnabled` option of `MiCakeAspNetUowOption` is enabled (defaults to true), `SaveChangesAsync()` is called automatically at the end of every HTTP request - no manual action is required.
+A: All pending events on aggregate roots are dispatched automatically when the **unit of work commits** (`IUnitOfWork.CommitAsync()`). If you use the default `MiCake.AspNetCore` module integration and the `EnableAutoUnitOfWork` option of `MiCakeAspNetUowOptions` is enabled (defaults to true), `CommitAsync()` is called automatically at the end of every HTTP request - no manual action is required.
 
 ### Q: What is the difference between Query() and FindAsync()?
 
@@ -465,6 +494,6 @@ The MiCake repository pattern:
 - Hides persistence details
 
 Next steps:
-- Learn about [Domain Events](../domain-driven/domain-event/) to understand event-driven development
-- Read about [Unit of Work](../domain-driven/unit-of-work/) to understand transaction management
-- Check out [Aggregate Roots](../domain-driven/aggregate-root/) to understand aggregate design
+- Learn about [Domain Events](/en/domain-driven/domain-event/) to understand event-driven development
+- Read about [Unit of Work](/en/domain-driven/unit-of-work/) to understand transaction management
+- Check out [Aggregate Roots](/en/domain-driven/aggregate-root/) to understand aggregate design

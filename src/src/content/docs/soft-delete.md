@@ -142,7 +142,9 @@ public async Task<IActionResult> DeleteProduct(int id)
 
     // 软删除（不会真正删除）
     await _productRepository.DeleteAsync(product);
-    await _productRepository.SaveChangesAsync();
+
+    // 提交工作单元（ASP.NET Core 场景由请求边界自动提交）
+    await _unitOfWork.CommitAsync();
 
     // 数据库中 IsDeleted 字段会被设置为 true
     // 如果实现了 IHasDeletedAt，DeletedAt 会被设置为当前时间
@@ -337,6 +339,10 @@ public class DataCleanupService
     }
 }
 ```
+
+:::note
+示例直接使用 `DbContext.SaveChangesAsync()`（绕过仓储/UoW）。无 UoW 的直接 `DbContext` 写入按原生 EF Core 语义**放行**（隐式事务，无回滚/生命周期保证）；需要事务保证时请使用环境工作单元或 `IStandaloneUnitOfWorkExecutor`。
+:::
 
 
 ## 注意事项

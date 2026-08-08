@@ -18,7 +18,7 @@ title: 快速开始
 下面的步骤将指导您如何使用 MiCake 提供的`dotnet new`模板来快速创建一个新的项目。
 在此之前请确保您已经安装了最新的.NET SDK。
 
-如果你想基于自己的项目来构建，请参考[现有项目集成](./from-custom.md) 
+如果你想基于自己的项目来构建，请参考[现有项目集成](/getting-started/from-custom/) 
 
 ### 1. 安装模板集合
 
@@ -79,11 +79,11 @@ dotnet run
 
 恭喜！您已经成功搭建了一个基于 MiCake 的 DDD 应用。接下来可以：
 
-- 学习 [核心概念](./core-concepts.md) 深入理解 MiCake 的设计
-- 阅读 [实体](../domain-driven/entity.md) 了解实体的详细用法
-- 探索 [聚合根](../domain-driven/aggregate-root.md) 学习聚合的设计原则
-- 查看 [领域事件](../domain-driven/domain-event.md) 掌握事件驱动开发
-- 学习 [仓储](../domain-driven/repository.md) 了解数据持久化的最佳实践
+- 学习 [核心概念](/getting-started/core-concepts/) 深入理解 MiCake 的设计
+- 阅读 [实体](/domain-driven/entity/) 了解实体的详细用法
+- 探索 [聚合根](/domain-driven/aggregate-root/) 学习聚合的设计原则
+- 查看 [领域事件](/domain-driven/domain-event/) 掌握事件驱动开发
+- 学习 [仓储](/domain-driven/repository/) 了解数据持久化的最佳实践
 
 ## 获取帮助
 

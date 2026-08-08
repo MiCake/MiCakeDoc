@@ -203,7 +203,7 @@ IReadOnlyCollection<IDomainEvent> events = order.DomainEvents;
 order.ClearDomainEvents();
 ```
 
-Events are dispatched automatically when `SaveChangesAsync()` is called; see the [Domain Events](../domain-driven/domain-event/) chapter for details.
+Events are dispatched automatically when the unit of work commits (`IUnitOfWork.CommitAsync()`); see the [Domain Events](/en/domain-driven/domain-event/) chapter for details.
 
 ## Business Methods on Entities
 
@@ -332,7 +332,7 @@ Key differences:
 - Only aggregate roots can have repositories
 - Regular entities can only be accessed through the aggregate root
 
-See the [Aggregate Root](../domain-driven/aggregate-root/) chapter for details.
+See the [Aggregate Root](/en/domain-driven/aggregate-root/) chapter for details.
 
 ## Best Practices
 
@@ -515,6 +515,6 @@ Entities are a fundamental concept in DDD. In MiCake:
 - Modify state through methods and validate business rules
 
 Next steps:
-- Learn about [Value Objects](../domain-driven/value-object/) to understand immutable objects
-- Read about [Aggregate Roots](../domain-driven/aggregate-root/) to understand aggregate design
-- Check out [Domain Events](../domain-driven/domain-event/) to master event-driven development
+- Learn about [Value Objects](/en/domain-driven/value-object/) to understand immutable objects
+- Read about [Aggregate Roots](/en/domain-driven/aggregate-root/) to understand aggregate design
+- Check out [Domain Events](/en/domain-driven/domain-event/) to master event-driven development

@@ -137,7 +137,7 @@ public class OrderSubmittedEventHandler : IDomainEventHandler<OrderSubmittedEven
         _logger = logger;
     }
 
-    public async Task HandleAysnc(OrderSubmittedEvent domainEvent, CancellationToken cancellationToken = default)
+    public async Task HandleAsync(OrderSubmittedEvent domainEvent, CancellationToken cancellationToken = default)
     {
         _logger.LogInformation($"Order {domainEvent.OrderId} submitted by customer {domainEvent.CustomerId}");
 
@@ -158,7 +158,7 @@ public class UserRegisteredEventHandler : IDomainEventHandler<UserRegisteredEven
     private readonly IEmailService _emailService;
     private readonly IRepository<UserProfile, int> _profileRepository;
 
-    public async Task HandleAysnc(UserRegisteredEvent domainEvent, CancellationToken cancellationToken = default)
+    public async Task HandleAsync(UserRegisteredEvent domainEvent, CancellationToken cancellationToken = default)
     {
         // 1. Send a welcome email
         await _emailService.SendWelcomeEmailAsync(domainEvent.Email);
@@ -166,7 +166,7 @@ public class UserRegisteredEventHandler : IDomainEventHandler<UserRegisteredEven
         // 2. Create the user profile
         var profile = UserProfile.Create(domainEvent.UserId);
         await _profileRepository.AddAsync(profile, cancellationToken);
-        await _profileRepository.SaveChangesAsync(cancellationToken);
+        // The changes are committed by the ambient UoW - no manual save is needed
 
         // 3. Write a log
         Console.WriteLine($"User {domainEvent.UserId} registered at {domainEvent.RegisteredAt}");
@@ -182,7 +182,7 @@ A single event can have multiple handlers:
 // Handler 1: send an email
 public class OrderSubmittedEmailHandler : IDomainEventHandler<OrderSubmittedEvent>
 {
-    public async Task HandleAysnc(OrderSubmittedEvent domainEvent, CancellationToken cancellationToken)
+    public async Task HandleAsync(OrderSubmittedEvent domainEvent, CancellationToken cancellationToken)
     {
         // Send an email
     }
@@ -191,7 +191,7 @@ public class OrderSubmittedEmailHandler : IDomainEventHandler<OrderSubmittedEven
 // Handler 2: update inventory
 public class OrderSubmittedInventoryHandler : IDomainEventHandler<OrderSubmittedEvent>
 {
-    public async Task HandleAysnc(OrderSubmittedEvent domainEvent, CancellationToken cancellationToken)
+    public async Task HandleAsync(OrderSubmittedEvent domainEvent, CancellationToken cancellationToken)
     {
         // Decrease inventory
     }
@@ -200,7 +200,7 @@ public class OrderSubmittedInventoryHandler : IDomainEventHandler<OrderSubmitted
 // Handler 3: write a log
 public class OrderSubmittedLoggingHandler : IDomainEventHandler<OrderSubmittedEvent>
 {
-    public async Task HandleAysnc(OrderSubmittedEvent domainEvent, CancellationToken cancellationToken)
+    public async Task HandleAsync(OrderSubmittedEvent domainEvent, CancellationToken cancellationToken)
     {
         // Write a log
     }
@@ -211,12 +211,13 @@ public class OrderSubmittedLoggingHandler : IDomainEventHandler<OrderSubmittedEv
 
 ## Automatic Event Dispatch
 
-MiCake automatically dispatches domain events when `SaveChangesAsync()` is called:
+MiCake automatically dispatches domain events when the **unit of work commits** (`IUnitOfWork.CommitAsync()`):
 
 ```csharp
 public class OrderService
 {
     private readonly IRepository<Order, int> _orderRepository;
+    private readonly IUnitOfWork _unitOfWork;
 
     public async Task SubmitOrder(int orderId)
     {
@@ -229,11 +230,11 @@ public class OrderService
         // 3. Update the aggregate root
         await _orderRepository.UpdateAsync(order);
 
-        // 4. Save changes - all events are dispatched automatically at this point
-        await _orderRepository.SaveChangesAsync();
-        // The SaveChangesAsync internal flow:
+        // 4. Commit the unit of work - all events are dispatched automatically at this point
+        await _unitOfWork.CommitAsync();
+        // The CommitAsync internal flow:
         // a. Collect all pending events on the aggregate root
-        // b. Persist the data to the database
+        // b. Persist the data to the database (flush)
         // c. Dispatch events to the corresponding handlers in order
         // d. Clear the dispatched events
     }
@@ -252,8 +253,8 @@ public class OrderService
 3. The event is temporarily stored on the aggregate root
    _domainEvents.Add(event)
       ↓
-4. Save changes
-   await repository.SaveChangesAsync()
+4. Commit the unit of work
+   await unitOfWork.CommitAsync()
       ↓
 5. Collect all events
    events = aggregateRoot.DomainEvents
@@ -292,7 +293,7 @@ public class OrderSubmittedInventoryHandler : IDomainEventHandler<OrderSubmitted
 {
     private readonly IRepository<Product, int> _productRepository;
 
-    public async Task HandleAysnc(OrderSubmittedEvent domainEvent, CancellationToken cancellationToken)
+    public async Task HandleAsync(OrderSubmittedEvent domainEvent, CancellationToken cancellationToken)
     {
         // Decrease inventory
         foreach (var item in domainEvent.Items)
@@ -302,7 +303,7 @@ public class OrderSubmittedInventoryHandler : IDomainEventHandler<OrderSubmitted
             await _productRepository.UpdateAsync(product);
         }
 
-        await _productRepository.SaveChangesAsync(cancellationToken);
+        // The changes are committed by the ambient UoW
     }
 }
 ```
@@ -328,7 +329,7 @@ public class User : AggregateRoot<int>
 // Multiple handlers coordinate to complete the registration flow
 public class SendVerificationEmailHandler : IDomainEventHandler<UserRegisteredEvent>
 {
-    public async Task HandleAysnc(UserRegisteredEvent domainEvent, CancellationToken cancellationToken)
+    public async Task HandleAsync(UserRegisteredEvent domainEvent, CancellationToken cancellationToken)
     {
         // Send a verification email
     }
@@ -336,7 +337,7 @@ public class SendVerificationEmailHandler : IDomainEventHandler<UserRegisteredEv
 
 public class CreateUserProfileHandler : IDomainEventHandler<UserRegisteredEvent>
 {
-    public async Task HandleAysnc(UserRegisteredEvent domainEvent, CancellationToken cancellationToken)
+    public async Task HandleAsync(UserRegisteredEvent domainEvent, CancellationToken cancellationToken)
     {
         // Create the user profile
     }
@@ -344,7 +345,7 @@ public class CreateUserProfileHandler : IDomainEventHandler<UserRegisteredEvent>
 
 public class InitializeUserSettingsHandler : IDomainEventHandler<UserRegisteredEvent>
 {
-    public async Task HandleAysnc(UserRegisteredEvent domainEvent, CancellationToken cancellationToken)
+    public async Task HandleAsync(UserRegisteredEvent domainEvent, CancellationToken cancellationToken)
     {
         // Initialize user settings
     }
@@ -366,7 +367,7 @@ public class OrderAuditEventHandler : IDomainEventHandler<OrderStatusChangedEven
 {
     private readonly IAuditLogRepository _auditRepository;
 
-    public async Task HandleAysnc(OrderStatusChangedEvent domainEvent, CancellationToken cancellationToken)
+    public async Task HandleAsync(OrderStatusChangedEvent domainEvent, CancellationToken cancellationToken)
     {
         var auditLog = new AuditLog
         {
@@ -379,7 +380,7 @@ public class OrderAuditEventHandler : IDomainEventHandler<OrderStatusChangedEven
         };
 
         await _auditRepository.AddAsync(auditLog);
-        await _auditRepository.SaveChangesAsync(cancellationToken);
+        // The changes are committed by the ambient UoW - no manual save is needed
     }
 }
 ```
@@ -398,7 +399,7 @@ public class OrderShippedNotificationHandler : IDomainEventHandler<OrderShippedE
 {
     private readonly INotificationService _notificationService;
 
-    public async Task HandleAysnc(OrderShippedEvent domainEvent, CancellationToken cancellationToken)
+    public async Task HandleAsync(OrderShippedEvent domainEvent, CancellationToken cancellationToken)
     {
         // Send an email notification
         await _notificationService.SendEmailAsync(
@@ -471,7 +472,7 @@ public class OrderCreatedEmailHandler : IDomainEventHandler<OrderCreatedEvent>
     private readonly IEmailService _emailService;
     private readonly IEmailLogRepository _emailLogRepository;
 
-    public async Task HandleAysnc(OrderCreatedEvent domainEvent, CancellationToken cancellationToken)
+    public async Task HandleAsync(OrderCreatedEvent domainEvent, CancellationToken cancellationToken)
     {
         // Check whether it has already been sent (idempotency)
         var alreadySent = await _emailLogRepository.ExistsAsync(
@@ -491,8 +492,7 @@ public class OrderCreatedEmailHandler : IDomainEventHandler<OrderCreatedEvent>
             Type = "OrderCreated",
             SentAt = DateTime.UtcNow
         });
-
-        await _emailLogRepository.SaveChangesAsync(cancellationToken);
+        // The changes are committed by the ambient UoW - no manual save is needed
     }
 }
 ```
@@ -527,7 +527,7 @@ public class OrderSubmittedEvent : IDomainEvent
 // ❌ Avoid - synchronously execute time-consuming operations
 public class OrderPlacedHandler : IDomainEventHandler<OrderPlacedEvent>
 {
-    public async Task HandleAysnc(OrderPlacedEvent domainEvent, CancellationToken cancellationToken)
+    public async Task HandleAsync(OrderPlacedEvent domainEvent, CancellationToken cancellationToken)
     {
         // This blocks the transaction
         await SendEmailAsync();  // May be slow
@@ -541,7 +541,7 @@ public class OrderPlacedHandler : IDomainEventHandler<OrderPlacedEvent>
 {
     private readonly IMessageQueue _messageQueue;
 
-    public async Task HandleAysnc(OrderPlacedEvent domainEvent, CancellationToken cancellationToken)
+    public async Task HandleAsync(OrderPlacedEvent domainEvent, CancellationToken cancellationToken)
     {
         // Publish to the queue quickly
         await _messageQueue.PublishAsync(new SendOrderEmailCommand(domainEvent.OrderId));
@@ -557,11 +557,11 @@ The MiCake domain event mechanism:
 - Implement the `IDomainEvent` interface to define events
 - Raise events in aggregate roots via `RaiseDomainEvent`
 - Implement `IDomainEventHandler<TEvent>` to handle events
-- Dispatch events automatically when `SaveChangesAsync` is called
+- Dispatch events automatically when the **unit of work commits** (`CommitAsync`/`FlushAsync`)
 - Used to implement loosely coupled communication between aggregates
 - Supports one event with multiple handlers
 
 Next steps:
-- Learn about [Domain Services](../domain-driven/domain-service/) to understand service design
-- Read about [Unit of Work](../domain-driven/unit-of-work/) to understand transaction management
-- Check out [Aggregate Roots](../domain-driven/aggregate-root/) to review aggregate design
+- Learn about [Domain Services](/en/domain-driven/domain-service/) to understand service design
+- Read about [Unit of Work](/en/domain-driven/unit-of-work/) to understand transaction management
+- Check out [Aggregate Roots](/en/domain-driven/aggregate-root/) to review aggregate design

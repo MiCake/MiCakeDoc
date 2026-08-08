@@ -633,6 +633,6 @@ public class Address : ValueObject
 - 使代码更具表达力和类型安全
 
 下一步：
-- 学习[聚合根](./聚合根.md)了解聚合设计
-- 阅读[仓储](./仓储.md)理解持久化
-- 查看[实体](./实体.md)对比实体与值对象
+- 学习[聚合根](/domain-driven/aggregate-root/)了解聚合设计
+- 阅读[仓储](/domain-driven/repository/)理解持久化
+- 查看[实体](/domain-driven/entity/)对比实体与值对象

@@ -76,3 +76,17 @@ The template uses PostgreSQL by default. To run the full functionality, make sur
 ## Next Steps
 
 Congratulations! You have successfully built a DDD application based on MiCake. Next, you can:
+
+- Learn [Core Concepts](/en/getting-started/core-concepts/) to understand MiCake's design in depth
+- Read about [Entities](/en/domain-driven/entity/) to learn the detailed usage of entities
+- Explore [Aggregate Roots](/en/domain-driven/aggregate-root/) to learn aggregate design principles
+- Check out [Domain Events](/en/domain-driven/domain-event/) to master event-driven development
+- Learn about [Repositories](/en/domain-driven/repository/) for data persistence best practices
+
+## Getting Help
+
+If you run into problems, you can:
+
+- Check [GitHub Issues](https://github.com/MiCake/MiCake/issues)
+- Read the detailed feature documentation
+- Refer to the sample code

@@ -31,11 +31,15 @@ public interface IRepository<TAggregateRoot, TKey>
     // 查询
     IQueryable<TAggregateRoot> Query();
     Task<TAggregateRoot?> FindAsync(TKey id, CancellationToken cancellationToken = default);
+    Task<TAggregateRoot?> FindAsync(
+        TKey id,
+        Func<IQueryable<TAggregateRoot>, IQueryable<TAggregateRoot>> includeFunc,
+        CancellationToken cancellationToken = default);
     Task<long> GetCountAsync(CancellationToken cancellationToken = default);
 
     // 添加
     Task AddAsync(TAggregateRoot aggregateRoot, CancellationToken cancellationToken = default);
-    Task<TAggregateRoot> AddAndReturnAsync(TAggregateRoot aggregateRoot, bool saveNow = true, CancellationToken cancellationToken = default);
+    Task<TKey> AddAndGetIdAsync(TAggregateRoot aggregateRoot, CancellationToken cancellationToken = default);
 
     // 更新
     Task UpdateAsync(TAggregateRoot aggregateRoot, CancellationToken cancellationToken = default);
@@ -43,11 +47,12 @@ public interface IRepository<TAggregateRoot, TKey>
     // 删除
     Task DeleteAsync(TAggregateRoot aggregateRoot, CancellationToken cancellationToken = default);
     Task DeleteByIdAsync(TKey id, CancellationToken cancellationToken = default);
-
-    // 保存
-    Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }
 ```
+
+:::note
+**仓储不再负责持久化。** 仓储方法只修改工作单元（Unit of Work）的跟踪状态，实际的数据库提交由环境中的 `IUnitOfWork.CommitAsync()` 统一完成。`SaveChangesAsync`、`AddAndReturnAsync`、`saveNow` 参数与 `ClearChangeTrackingAsync` 不属于仓储 API，请参见[迁移指南](/migration/v10-to-v11)。
+:::
 
 ### IReadOnlyRepository 接口
 
@@ -130,6 +135,10 @@ public class OrderService
 
 ## 仓储操作
 
+:::note
+以下示例中的 `_unitOfWork` 是注入的环境工作单元（`IUnitOfWork`）。在 ASP.NET Core 应用中工作单元由请求边界自动创建并提交，此时可以省略手动 `CommitAsync()`；在非 Web 场景或需要精确控制时，通过 `IUnitOfWorkManager.BeginAsync()` 手动创建并提交。
+:::
+
 ### 1. 添加聚合根
 
 ```csharp
@@ -139,12 +148,12 @@ public async Task CreateOrder(CreateOrderDto dto)
     var order = Order.Create(dto.CustomerId);
     order.AddItem(dto.ProductId, dto.Quantity, dto.Price);
 
-    // 添加到仓储
+    // 添加到仓储（仅修改 UoW 跟踪状态，不立即持久化）
     await _orderRepository.AddAsync(order);
 
-    // 保存更改
-    await _orderRepository.SaveChangesAsync();
-    // SaveChangesAsync 会：
+    // 由环境工作单元统一提交（ASP.NET Core 自动提交，或手动 CommitAsync）
+    await _unitOfWork.CommitAsync();
+    // CommitAsync 会：
     // 1. 持久化聚合根
     // 2. 自动派发领域事件
     // 3. 更新审计字段
@@ -153,19 +162,28 @@ public async Task CreateOrder(CreateOrderDto dto)
 
 ### 2. 添加并返回（获取自增 ID）
 
+如果需要在提交前立即获取数据库生成的键（如自增 ID），使用 `AddAndGetIdAsync`：
+
 ```csharp
-public async Task<Order> CreateOrderAndReturn(CreateOrderDto dto)
+public async Task<int> CreateOrderAndReturn(CreateOrderDto dto)
 {
     var order = Order.Create(dto.CustomerId);
     order.AddItem(dto.ProductId, dto.Quantity, dto.Price);
 
-    // 添加并立即保存，返回包含生成的 ID 的对象
-    var savedOrder = await _orderRepository.AddAndReturnAsync(order, saveNow: true);
+    // 添加并 Flush 填充生成键，返回 TKey（不提交事务）
+    var orderId = await _orderRepository.AddAndGetIdAsync(order);
 
-    Console.WriteLine($"New order ID: {savedOrder.Id}");
-    return savedOrder;
+    Console.WriteLine($"New order ID: {orderId}");
+
+    // 提交后数据才持久化
+    await _unitOfWork.CommitAsync();
+    return orderId;
 }
 ```
+
+:::note
+`AddAndGetIdAsync` 内部执行 `AddAsync` + `FlushAsync` 来填充生成键，需要环境存在**可写的工作单元**，否则抛出 `InvalidOperationException`。接口注入场景也可使用 `AddAsync` + `IUnitOfWork.FlushAsync()` 组合，行为等价。
+:::
 
 ### 3. 查询聚合根
 
@@ -205,34 +223,45 @@ public async Task<List<Order>> GetCustomerOrders(int customerId)
 ```csharp
 public async Task UpdateOrder(int orderId, UpdateOrderDto dto)
 {
-    // 加载聚合根
+    // 加载聚合根（推荐 load-and-modify 工作流）
     var order = await _orderRepository.FindAsync(orderId);
     if (order == null)
         throw new DomainException("Order not found");
 
     // 通过聚合根方法修改
     order.UpdateShippingAddress(dto.ShippingAddress);
+
+    // 由 UoW 统一提交（ASP.NET Core 自动提交，或手动 CommitAsync）
+    await _unitOfWork.CommitAsync();
 }
 ```
+
+:::note
+对**未跟踪实例**调用 `UpdateAsync` 会执行**完整分离聚合替换**：写入实例的全部属性。配置的并发令牌会被保留，因此过期实例会在 flush/commit 时抛出 `DbUpdateConcurrencyException`，而不是被静默覆盖。
+:::
 
 ### 5. 删除聚合根
 
 ```csharp
 public async Task DeleteOrder(int orderId)
 {
-    // 方式一：先加载再删除
+    // 方式一：先加载再删除（跟踪式删除，软删除/审计/领域事件/回滚语义与 DeleteAsync 一致）
     var order = await _orderRepository.FindAsync(orderId);
     if (order != null)
     {
         await _orderRepository.DeleteAsync(order);
-        await _orderRepository.SaveChangesAsync();
+        await _unitOfWork.CommitAsync();
     }
 
-    // 方式二：直接通过 ID 删除
+    // 方式二：直接通过 ID 删除（先加载到稳定 UoW 上下文再执行跟踪式删除）
     await _orderRepository.DeleteByIdAsync(orderId);
-    await _orderRepository.SaveChangesAsync();
+    await _unitOfWork.CommitAsync();
 }
 ```
+
+:::note
+需要绕过聚合生命周期**立即物理删除**时，改用显式物理删除执行器 `IEFCorePhysicalOperationExecutor<TDbContext>`（见[迁移指南](/migration/v10-to-v11)）。
+:::
 
 ## 复杂查询
 
@@ -331,12 +360,12 @@ public async Task SubmitOrder(int orderId)
 
     await _orderRepository.UpdateAsync(order);
 
-    // SaveChangesAsync 时会自动：
+    // CommitAsync 时会自动：
     // 1. 持久化数据
     // 2. 收集聚合根上的所有领域事件
     // 3. 按顺序派发事件到对应的处理器
     // 4. 清除已派发的事件
-    await _orderRepository.SaveChangesAsync();
+    await _unitOfWork.CommitAsync();
 
     // 此时 OrderSubmittedEvent 已被处理
 }
@@ -361,7 +390,7 @@ public async Task DeleteProduct(int productId)
     
     // 调用 DeleteAsync 会设置 IsDeleted = true
     await _productRepository.DeleteAsync(product);
-    await _productRepository.SaveChangesAsync();
+    await _unitOfWork.CommitAsync();
     
     // 产品未被物理删除，只是标记为已删除
 }
@@ -394,13 +423,13 @@ public class Article : AggregateRoot<int>, IHasCreationTime, IHasModificationTim
 // 创建时
 var article = Article.Create("My Article");
 await _articleRepository.AddAsync(article);
-await _articleRepository.SaveChangesAsync();
+await _unitOfWork.CommitAsync();
 // CreatedTime 自动设置为当前时间
 
 // 更新时
 article.UpdateTitle("New Title");
 await _articleRepository.UpdateAsync(article);
-await _articleRepository.SaveChangesAsync();
+await _unitOfWork.CommitAsync();
 // ModifiedTime 自动更新为当前时间
 ```
 
@@ -443,9 +472,9 @@ public async Task<List<Order>> GetOrdersByRawFilter(string filter)
 
 ## 常见问题
 
-### Q: 仓储何时会自动派发领域事件？
+### Q: 领域事件何时自动派发？
 
-A: 在调用 `SaveChangesAsync()` 时自动派发聚合根上的所有待处理事件，如果使用了默认的`MiCake.AspNetCore`模块集成，当`MiCakeAspNetUowOption`的`IsAutoUowEnabled`选项被启用时（默认为true），`SaveChangesAsync()`会在每次HTTP请求结束时自动调用，无须用户手动操作。
+A: 在**工作单元提交**（`IUnitOfWork.CommitAsync()`）时自动派发聚合根上的所有待处理事件。如果使用了默认的 `MiCake.AspNetCore` 模块集成，当 `MiCakeAspNetUowOptions.EnableAutoUnitOfWork` 选项被启用时（默认为 true），`CommitAsync()` 会在每次 HTTP 请求结束时自动调用，无须用户手动操作。
 
 ### Q: Query() 和 FindAsync() 有什么区别？
 

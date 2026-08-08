@@ -33,7 +33,7 @@ export default defineConfig({
 				// 文档版本化：当前文档为最新版，归档版本见 versions 数组
 				// 新增版本流程：1) 在 versions 数组加新 slug 2) 启动 dev 自动归档当前版
 				starlightVersions({
-					current: { label: '最新版' },
+					current: { label: 'v11.0.0-preview' },
 					versions: [
 						{ slug: '10.0.0', label: 'v10.0.0' },
 					],
@@ -49,8 +49,7 @@ export default defineConfig({
 				'./src/styles/custom.css',
 			],
 			components: {
-				// 覆盖默认标题组件：在文档标题旁添加「查看 Markdown 原文」按钮
-				PageTitle: './src/components/PageTitle.astro',
+				EditLink: './src/components/EditLink.astro',
 			},
 			expressiveCode: {
 				themes: ['github-dark', 'github-light'],
@@ -68,6 +67,13 @@ export default defineConfig({
 						{ label: '快速开始', translations: { en: 'Quick Start' }, slug: 'getting-started/quick-start' },
 						{ label: '现有项目集成', translations: { en: 'Integrating with an Existing Project' }, slug: 'getting-started/from-custom' },
 						{ label: '核心概念', translations: { en: 'Core Concepts' }, slug: 'getting-started/core-concepts' },
+					],
+				},
+				{
+					label: '升级指南',
+					translations: { en: 'Upgrade Guide' },
+					items: [
+						{ label: 'v10 → v11 迁移指南', translations: { en: 'v10 → v11 Migration Guide' }, slug: 'migration/v10-to-v11' },
 					],
 				},
 				{

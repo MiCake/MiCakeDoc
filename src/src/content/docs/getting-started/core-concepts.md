@@ -151,11 +151,14 @@ public interface IRepository<TAggregateRoot, TKey>
 {
     Task<TAggregateRoot> FindAsync(TKey id);
     Task AddAsync(TAggregateRoot aggregateRoot);
+    Task AddAndGetIdAsync(TAggregateRoot aggregateRoot);
     Task UpdateAsync(TAggregateRoot aggregateRoot);
     Task DeleteAsync(TAggregateRoot aggregateRoot);
-    Task<int> SaveChangesAsync();
+    Task DeleteByIdAsync(TKey id);
 }
 ```
+
+> **仓储不再负责持久化**：仓储方法只修改工作单元（UoW）的跟踪状态，数据提交由 `IUnitOfWork.CommitAsync()` 统一完成。
 
 ### 仓储只针对聚合根
 
@@ -217,7 +220,7 @@ public class Order : AggregateRoot<int>
 // 3. 处理事件
 public class OrderPlacedEventHandler : IDomainEventHandler<OrderPlacedEvent>
 {
-    public Task HandleAysnc(OrderPlacedEvent domainEvent, CancellationToken cancellationToken)
+    public Task HandleAsync(OrderPlacedEvent domainEvent, CancellationToken cancellationToken)
     {
         // 发送邮件通知
         // 更新库存
@@ -229,14 +232,14 @@ public class OrderPlacedEventHandler : IDomainEventHandler<OrderPlacedEvent>
 
 ### 事件的自动派发
 
-领域事件会在调用 `SaveChangesAsync` 时自动派发：
+领域事件会在**工作单元提交**（`IUnitOfWork.CommitAsync()`）时自动派发：
 
 ```csharp
 var order = Order.Create(customer);
 order.PlaceOrder();  // 触发事件，但不立即派发
 
 await repository.AddAsync(order);
-await repository.SaveChangesAsync();  // 此时自动派发所有事件
+await unitOfWork.CommitAsync();  // 此时自动派发所有事件
 ```
 
 ## 工作单元（Unit of Work）
@@ -275,7 +278,6 @@ public class OrderController : ControllerBase
         }
         
         await _orderRepository.AddAsync(order);
-        await _orderRepository.SaveChangesAsync();
 
         // 2. 更新产品库存
         foreach (var item in dto.Items)
@@ -283,17 +285,15 @@ public class OrderController : ControllerBase
             var product = await _productRepository.FindAsync(item.ProductId);
             product.DecreaseStock(item.Quantity);
         }
-        
-        await _productRepository.SaveChangesAsync();
 
-        // 方法正常返回时，自动提交事务
+        // 方法正常返回时，UoW 自动提交事务
         // 如果抛出异常，自动回滚事务
         return Ok(order.Id);
     }
 }
 ```
 
-具体例子请阅读[工作单元文档](./工作单元.md)。
+具体例子请阅读[工作单元文档](/domain-driven/unit-of-work/)。
 
 ## 依赖注入
 
@@ -356,8 +356,8 @@ public class MyService : IMyService
 
 现在您已经理解了 MiCake 的核心概念，可以深入学习各个具体组件：
 
-- [实体](./实体.md) - 了解实体的详细用法
-- [值对象](./值对象.md) - 学习值对象的设计
-- [聚合根](./聚合根.md) - 掌握聚合的设计原则
-- [仓储](./仓储.md) - 深入理解仓储模式
-- [领域事件](./领域事件.md) - 实现事件驱动架构
+- [实体](/domain-driven/entity/) - 了解实体的详细用法
+- [值对象](/domain-driven/value-object/) - 学习值对象的设计
+- [聚合根](/domain-driven/aggregate-root/) - 掌握聚合的设计原则
+- [仓储](/domain-driven/repository/) - 深入理解仓储模式
+- [领域事件](/domain-driven/domain-event/) - 实现事件驱动架构

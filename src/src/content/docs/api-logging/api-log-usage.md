@@ -332,6 +332,8 @@ public class DatabaseApiLogWriter : IApiLogWriter
         };
 
         dbContext.ApiLogs.Add(logRecord);
+        // 直接使用原生 EF DbContext 写入（绕过仓储/UoW）。
+        // 无 UoW 的直接 DbContext 写入按原生 EF Core 语义放行（隐式事务，无回滚/生命周期保证）。
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 }
@@ -1202,7 +1204,7 @@ asp.ApiLoggingOptions.TruncationStrategy = TruncationStrategy.MetadataOnly;
 ```csharp
 public async Task WriteAsync(ApiLogEntry entry, CancellationToken cancellationToken)
 {
-    // ✅ 使用异步 I/O
+    // ✅ 使用异步 I/O（直接使用原生 EF DbContext，无 UoW 写入按原生语义放行）
     await _dbContext.ApiLogs.AddAsync(logRecord, cancellationToken);
     await _dbContext.SaveChangesAsync(cancellationToken);
     

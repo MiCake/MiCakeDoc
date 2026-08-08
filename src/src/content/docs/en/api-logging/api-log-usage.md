@@ -332,6 +332,8 @@ public class DatabaseApiLogWriter : IApiLogWriter
         };
 
         dbContext.ApiLogs.Add(logRecord);
+        // Uses the raw EF Core DbContext directly (bypassing repositories/UoW).
+        // Direct DbContext writes without a UoW are allowed with native EF Core semantics (implicit transaction, no rollback/lifecycle guarantees).
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 }
@@ -1202,7 +1204,7 @@ Make sure the `IApiLogWriter` implementation is asynchronous to avoid blocking r
 ```csharp
 public async Task WriteAsync(ApiLogEntry entry, CancellationToken cancellationToken)
 {
-    // ✅ Use asynchronous I/O
+    // ✅ Use asynchronous I/O (raw EF DbContext; writes without a UoW are allowed with native semantics)
     await _dbContext.ApiLogs.AddAsync(logRecord, cancellationToken);
     await _dbContext.SaveChangesAsync(cancellationToken);
     

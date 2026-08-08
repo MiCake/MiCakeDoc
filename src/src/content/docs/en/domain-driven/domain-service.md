@@ -124,9 +124,9 @@ public class OrderApplicationService
         var total = _pricingService.CalculateOrderTotal(order, customer.GetActivePromotions());
         order.SetTotalAmount(total);
         
-        // 4. Persist
+        // 4. Persist (committed by the ambient UoW)
         await _orderRepository.AddAsync(order);
-        await _orderRepository.SaveChangesAsync();
+        await _unitOfWork.CommitAsync();
         
         // 5. Return a DTO
         return MapToDto(order);
@@ -270,7 +270,7 @@ public class OrderApplicationService
         var order = await _orderRepository.FindAsync(orderId);
         var total = _pricingService.CalculateTotal(order);
         order.SetTotal(total);
-        await _orderRepository.SaveChangesAsync();
+        await _unitOfWork.CommitAsync();
     }
 }
 ```
@@ -409,6 +409,6 @@ Domain services are used to encapsulate business logic that does not belong to e
 - Used through dependency injection
 
 Next steps:
-- Learn about [Unit of Work](../domain-driven/unit-of-work/) to understand transaction management
-- Read about [Aggregate Roots](../domain-driven/aggregate-root/) to understand aggregate design
-- Check out [Repositories](../domain-driven/repository/) to learn about data access
+- Learn about [Unit of Work](/en/domain-driven/unit-of-work/) to understand transaction management
+- Read about [Aggregate Roots](/en/domain-driven/aggregate-root/) to understand aggregate design
+- Check out [Repositories](/en/domain-driven/repository/) to learn about data access

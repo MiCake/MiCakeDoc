@@ -203,7 +203,7 @@ IReadOnlyCollection<IDomainEvent> events = order.DomainEvents;
 order.ClearDomainEvents();
 ```
 
-事件会在调用 `SaveChangesAsync()` 时自动派发，详见[领域事件](./领域事件.md)章节。
+事件会在工作单元提交（`IUnitOfWork.CommitAsync()`）时自动派发，详见[领域事件](/domain-driven/domain-event/)章节。
 
 ## 实体的业务方法
 
@@ -332,7 +332,7 @@ public class Order : AggregateRoot<int>
 - 只有聚合根可以有仓储
 - 普通实体只能通过聚合根访问
 
-详见[聚合根](./聚合根.md)章节。
+详见[聚合根](/domain-driven/aggregate-root/)章节。
 
 ## 最佳实践
 
@@ -515,6 +515,6 @@ public class Order : Entity<int>
 - 通过方法修改状态并验证业务规则
 
 下一步：
-- 学习[值对象](./值对象.md)了解不可变对象
-- 阅读[聚合根](./聚合根.md)理解聚合设计
-- 查看[领域事件](./领域事件.md)掌握事件驱动
+- 学习[值对象](/domain-driven/value-object/)了解不可变对象
+- 阅读[聚合根](/domain-driven/aggregate-root/)理解聚合设计
+- 查看[领域事件](/domain-driven/domain-event/)掌握事件驱动

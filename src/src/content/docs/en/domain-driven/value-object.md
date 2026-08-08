@@ -633,6 +633,6 @@ Value objects are an important concept in DDD. In MiCake:
 - Make code more expressive and type-safe
 
 Next steps:
-- Learn about [Aggregate Roots](../domain-driven/aggregate-root/) to understand aggregate design
-- Read about [Repositories](../domain-driven/repository/) to understand persistence
-- Check out [Entities](../domain-driven/entity/) to compare entities and value objects
+- Learn about [Aggregate Roots](/en/domain-driven/aggregate-root/) to understand aggregate design
+- Read about [Repositories](/en/domain-driven/repository/) to understand persistence
+- Check out [Entities](/en/domain-driven/entity/) to compare entities and value objects

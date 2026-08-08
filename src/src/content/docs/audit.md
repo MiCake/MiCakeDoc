@@ -175,18 +175,16 @@ services.AddSingleton<TimeProvider>(
 // 创建实体
 var article = new Article { Title = "My Article" };
 await _articleRepository.AddAsync(article);
-await _articleRepository.SaveChangesAsync();
-// CreatedAt 自动设置为当前时间
+await _unitOfWork.CommitAsync();   // 提交时 CreatedAt 自动设置为当前时间
 
 // 更新实体
 article.UpdateTitle("New Title");
 await _articleRepository.UpdateAsync(article);
-await _articleRepository.SaveChangesAsync();
-// UpdatedAt 自动更新为当前时间
+await _unitOfWork.CommitAsync();   // 提交时 UpdatedAt 自动更新为当前时间
 ```
 
 :::note
-审计功能通过 `IAuditExecutor` 和 `IAuditProvider` 实现，在 Repository 的 `SaveChangesAsync` 时自动触发。
+审计功能通过 `IAuditExecutor`（框架内部）和 `IAuditProvider` 实现，在**工作单元提交**（flush/commit）时自动触发。
 :::
 
 ## 自定义审计提供者
@@ -499,8 +497,8 @@ MiCake 的审计功能通过以下组件实现：
 
 1. **IAuditProvider**: 审计提供者接口，定义审计逻辑
 2. **DefaultTimeAuditProvider**: 默认时间审计提供者，处理创建和修改时间
-3. **IAuditExecutor**: 审计执行器，负责调用所有注册的审计提供者
-4. **AuditRepositoryLifetime**: Repository 生命周期钩子，在 `SaveChangesAsync` 前自动执行审计
+3. **IAuditExecutor**: 审计执行器（框架内部实现），负责调用所有注册的审计提供者
+4. **AuditRepositoryLifetime**: Repository 生命周期钩子（框架内部实现），在工作单元提交（flush/commit）前自动执行审计
 
 审计只对实现了 MiCake DDD 领域对象接口（如 `Entity`、`AggregateRoot`）的实体生效。
 
@@ -513,7 +511,7 @@ MiCake 自动审计功能特点：
 - **时区友好**: 推荐使用 `DateTimeOffset`，保留时区信息，适合跨时区应用
 - **依赖注入**: 通过 `TimeProvider` 注入，易于测试和自定义
 - **智能审计**: 自动检测 Owned Entity 变更，更新父实体审计时间
-- **自动触发**: 在 `SaveChangesAsync` 时自动填充审计字段
+- **自动触发**: 在工作单元提交（flush/commit）时自动填充审计字段
 - **多提供者**: 支持注册多个审计提供者，按顺序执行
 - **软删除支持**: 内置软删除功能，标记删除而非物理删除
 - **类型安全**: 基于接口设计，编译时检查

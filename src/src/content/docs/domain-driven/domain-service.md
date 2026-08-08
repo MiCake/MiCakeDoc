@@ -124,9 +124,9 @@ public class OrderApplicationService
         var total = _pricingService.CalculateOrderTotal(order, customer.GetActivePromotions());
         order.SetTotalAmount(total);
         
-        // 4. 持久化
+        // 4. 持久化（由环境 UoW 统一提交）
         await _orderRepository.AddAsync(order);
-        await _orderRepository.SaveChangesAsync();
+        await _unitOfWork.CommitAsync();
         
         // 5. 返回 DTO
         return MapToDto(order);
@@ -270,7 +270,7 @@ public class OrderApplicationService
         var order = await _orderRepository.FindAsync(orderId);
         var total = _pricingService.CalculateTotal(order);
         order.SetTotal(total);
-        await _orderRepository.SaveChangesAsync();
+        await _unitOfWork.CommitAsync();
     }
 }
 ```
