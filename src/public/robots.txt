@@ -1,0 +1,27 @@
+# 允许 AI 爬虫访问文档站点（作为在线知识库）
+User-agent: GPTBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-Web
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+# 其他爬虫
+User-agent: *
+Allow: /
+
+Sitemap: https://micake.github.io/sitemap-index.xml

@@ -45,20 +45,33 @@ export const getStaticPaths: GetStaticPaths = async () => {
   const files = getAllMarkdownFiles();
   
   // Add manifest path
+  // 注意：路径带 .txt 后缀 —— GitHub Pages 对无扩展名文件返回
+  // application/octet-stream（浏览器会下载），对 .txt 返回 text/plain（浏览器直接显示）
   const paths = [
-    { params: { path: 'manifest' } },
-    ...files.map(file => ({ params: { path: file.slug } }))
+    { params: { path: 'manifest.txt' } },
+    ...files.map(file => ({ params: { path: file.slug + '.txt' } }))
   ];
   
   return paths;
 };
 
 export const GET: APIRoute = async ({ params }) => {
-  const slug = params.path || '';
+  let slug = params.path || '';
+
+  // 固定使用 text/plain：
+  // - 站点为纯静态构建（GitHub Pages），运行时无法读取请求头做内容协商
+  // - text/plain 让浏览器直接显示内容而非下载（浏览器不认识 text/markdown 会触发下载）
+  // - AI 客户端读取 text/plain 无任何障碍（同 GitHub raw 文件的做法）
+  const contentType = 'text/plain; charset=utf-8';
+
+  // 兼容带或不带 .txt 后缀的请求（后缀仅用于静态托管的 MIME 识别）
+  if (slug.endsWith('.txt')) {
+    slug = slug.slice(0, -'.txt'.length);
+  }
   
   // Handle manifest request
   if (slug === 'manifest') {
-    return generateManifest();
+    return generateManifest(contentType);
   }
   
   const basePath = path.join(process.cwd(), 'src', 'content', 'docs');
@@ -89,15 +102,15 @@ export const GET: APIRoute = async ({ params }) => {
 Markdown file not found for path: \`${slug}\`
 
 ## Available paths:
-- \`/api/raw-markdown/manifest\` - View all available documents
-- \`/api/raw-markdown/{path}\` - Get raw markdown content
+- \`/api/raw-markdown/manifest.txt\` - View all available documents
+- \`/api/raw-markdown/{path}.txt\` - Get raw markdown content
 
 Please check the manifest for available document paths.
 `,
       { 
         status: 404,
         headers: {
-          'Content-Type': 'text/markdown; charset=utf-8'
+          'Content-Type': contentType
         }
       }
     );
@@ -109,7 +122,7 @@ Please check the manifest for available document paths.
     return new Response(content, {
       status: 200,
       headers: {
-        'Content-Type': 'text/markdown; charset=utf-8',
+        'Content-Type': contentType,
         'Cache-Control': 'public, max-age=3600'
       }
     });
@@ -126,20 +139,21 @@ Please try again later or contact support if the problem persists.
       { 
         status: 500,
         headers: {
-          'Content-Type': 'text/markdown; charset=utf-8'
+          'Content-Type': contentType
         }
       }
     );
   }
 };
 
-function generateManifest() {
+function generateManifest(contentType: string) {
   const basePath = path.join(process.cwd(), 'src', 'content', 'docs');
   const files: Array<{
     path: string;
     title: string;
     description?: string;
     type: 'md' | 'mdx';
+    lang: 'en' | 'zh';
     apiUrl: string;
   }> = [];
   
@@ -164,7 +178,8 @@ function generateManifest() {
           title: metadata.title || slug,
           description: metadata.description,
           type: item.endsWith('.mdx') ? 'mdx' : 'md',
-          apiUrl: `/api/raw-markdown/${slug}`
+          lang: slug.startsWith('en/') ? 'en' : 'zh',
+          apiUrl: `/api/raw-markdown/${slug}.txt`
         });
       }
     }
@@ -180,26 +195,34 @@ Generated at: ${new Date().toISOString()}
 ## Usage
 
 Access individual documents directly:
-- Get raw markdown: \`GET /api/raw-markdown/{path}\`
-- Example: \`GET /api/raw-markdown/getting-started/introduction\`
+- Get raw markdown: \`GET /api/raw-markdown/{path}.txt\`
+- Example: \`GET /api/raw-markdown/getting-started/introduction.txt\`
+- Manifest: \`GET /api/raw-markdown/manifest.txt\`
 
-All responses are raw markdown content with \`Content-Type: text/markdown\`.
+All responses are raw markdown content with \`Content-Type: text/plain; charset=utf-8\` (the \`.txt\` suffix ensures GitHub Pages serves it as \`text/plain\`, so browsers render it directly instead of downloading; equally consumable by AI agents).
+
+## Languages
+
+- English documents are served under the \`en/\` path prefix, e.g. \`/api/raw-markdown/en/getting-started/introduction.txt\`
+- English is the preferred language for AI consumption; Chinese originals are available at the root paths
+- The AI-readable navigation indexes: \`/llms.txt\` (English-first) and \`/llms-zh.txt\` (Chinese-only)
 
 ## Available Documents
 
 ${files.map(file => `### ${file.title}
 - **Path**: \`${file.path}\`
 - **Type**: ${file.type}
+- **Language**: ${file.lang === 'en' ? 'English' : '中文'}
 - **API URL**: ${file.apiUrl}
 ${file.description ? `- **Description**: ${file.description}` : ''}
 
-**Raw Content**: [${file.apiUrl}.md](${file.apiUrl}.md)
+**Raw Content**: [${file.apiUrl}.txt](${file.apiUrl}.txt)
 `).join('\n')}`;
   
   return new Response(markdownContent, {
     status: 200,
     headers: {
-      'Content-Type': 'text/markdown; charset=utf-8',
+      'Content-Type': contentType,
       'Cache-Control': 'public, max-age=3600'
     }
   });
